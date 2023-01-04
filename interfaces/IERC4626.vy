@@ -1,3 +1,4 @@
+# @version ^0.3.7
 
 interface IERC4626:
     def name() -> String[18]: view

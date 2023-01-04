@@ -1,3 +1,5 @@
+# @version ^0.3.7
+
 interface ISecuredLine:
     def ids(index: uint256) -> bytes32: view
     def status() -> uint256: view

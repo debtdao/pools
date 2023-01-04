@@ -1,3 +1,5 @@
+# @version ^0.3.7
+
 from interfaces import IERC3156FlashBorrower as IERC3156FlashBorrower
 
 interface IERC3156:

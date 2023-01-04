@@ -1,3 +1,5 @@
+# @version ^0.3.7
+
 interface IERC3156FlashBorrower:
     def onFlashLoan(
         initiator: address,
