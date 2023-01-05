@@ -104,7 +104,7 @@ pending_fee_recipient: public(address)
 # minimum amount of assets that can be deposited at once. whales only, fuck plebs.
 min_deposit: public(uint256)
 # maximum amount of asset deposits to allow into pool
-max_total_assets: public(uint256)
+max_assets: public(uint256)
 # amount of asset held externally in lines or vaults
 total_deployed: public(uint256)
 # shares earned by Delegate for managing pool
@@ -131,8 +131,6 @@ struct Fees:
 	collector: uint16
 	# % fee (in bps) to charge pool depositors and give to referrers
 	referral: uint16
-	# % fee (in bps) to charge person who impairs pool and slash owner fees
-	snitch: uint16
 
 enum FEE_TYPES:
 	# should be same order as Fees struct
@@ -147,31 +145,31 @@ enum FEE_TYPES:
 fees: public(Fees)
 
 
-
-
-# TODO initialize for proxy?
 @external
 def __init__(
   	delegate_: address,
 	asset_: address,
-	name_: String[50],
-	symbol_: String[18],
+	name_: String[34],
+	symbol_: String[16],
 	fees_: Fees,
 ):
 	"""
 	@dev configure data for contract owners and initial revenue contracts.
 		Owner/operator/treasury can all be the same address
-	@param delegate_ - who will own and control the pool
+	@param delegate_	who will own and control the pool
+	@param asset_ 		ERC20 token to deposit and lend. Must verify asset is supported by oracle on Lines you want to invest in.
+	@param name_ 		custom pool name. first 0-13 chars are templated  "Debt DAO Pool - {name_}"
+	@param symbol_ 		custom pool symbol. first 5 chars are templated  "dd{token.symbol}-{symbol_}"
+	@param fees 		fees to charge on pool
 	"""
 	self.owner = msg.sender # set owner to deployer for validation functions
 	assert delegate_ != empty(address)
-	assert self._validate_max_fee(fees_.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
+	assert self._assert_max_fee(fees_.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
 	assert self._assert_pittance_fee(fees_.collector, FEE_TYPES.COLLECTOR)
 	assert self._assert_pittance_fee(fees_.flash, FEE_TYPES.FLASH)
 	assert self._assert_pittance_fee(fees_.referral, FEE_TYPES.REFERRAL)
 	assert self._assert_pittance_fee(fees_.deposit, FEE_TYPES.DEPOSIT)
 	assert self._assert_pittance_fee(fees_.withdraw, FEE_TYPES.WITHDRAW)
-	assert self._assert_pittance_fee(fees_.snitch, FEE_TYPES.SNITCH)
 
 	# Setup Pool variables
 	self.owner = delegate_
@@ -180,10 +178,12 @@ def __init__(
 	# IERC20 vars
 	# TODO templatize name/symbol
 	# anme = CONTRACT_NAME + '-' +  name_ = 'Debt DAO Pool - Maven11 DAI'
-	name = name_
+	name = self._get_pool_name(name_)
 	# symbol = 'dd' + IERC20Detailed(asset_).symbol + '-' + symbol_ = 'ddDAI-MVN11'
-	symbol = symbol_
+	symbol = self._get_pool_symbol(symbol_)
+
 	# 4626 recommendation is to mimic decimals of underlying assets so less likely to be conversion errors
+	# TODO what happens if asset_ hs no decimals? revert if decimals fails
 	decimals = IERC20Detailed(asset_).decimals()
 	# IERC4626
 	asset = asset_
@@ -362,7 +362,7 @@ def update_min_deposit(new_min: uint256)  -> bool:
 @external
 def update_max_assets(new_max: uint256)  -> bool:
 	assert msg.sender == self.owner
-	self.max_total_assets = new_max
+	self.max_assets = new_max
 	log UpdateMaxAssets(new_max)
 	return True
 
@@ -370,7 +370,7 @@ def update_max_assets(new_max: uint256)  -> bool:
 ### Manage Pool Fees
 
 @internal
-def _validate_max_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
+def _assert_max_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
   assert msg.sender == self.owner
   assert fee <= FEE_COEFFICIENT # max 100% performance fee
   log UpdateFee(fee, fee_type)
@@ -380,7 +380,7 @@ def _validate_max_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
 @nonreentrant("lock")
 def update_performance_fee(fee: uint16) -> bool:
   self.fees.performance = fee
-  return self._validate_max_fee(fee, FEE_TYPES.PERFORMANCE)
+  return self._assert_max_fee(fee, FEE_TYPES.PERFORMANCE)
 
 @internal
 def _assert_pittance_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
@@ -566,6 +566,24 @@ def _caller_has_approval(owner: address, amount: uint256) -> bool:
 
 	return True
 
+@internal
+def erc20_safe_transfer(token: address, receiver: address, amount: uint256):
+    # Used only to send tokens that are not the type managed by this Vault.
+    # HACK: Used to handle non-compliant tokens like USDT
+    response: Bytes[32] = raw_call(
+        token,
+        concat(
+            method_id("transfer(address,uint256)"),
+            convert(receiver, bytes32),
+            convert(amount, bytes32),
+        ),
+        max_outsize=32,
+		revert_on_failure=True
+    )
+    if len(response) > 0:
+        assert convert(response, bool), "Transfer failed!"
+
+
 # 4626 + Pool internal functions
 
 # inflate supply to take fees. reduce share price. tax efficient.
@@ -684,7 +702,7 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 		# only _calc not _mint_and_calc so caller gets collector fees in raw asset for easier mev
 		log FeesGenerated(self, msg.sender, collector_fee, shares_earned, FEE_TYPES.COLLECTOR)
 		self.total_assets -= collector_fee * share_price # use pre-performance fee inflation price for payout
-		assert IERC20(asset).transfer(msg.sender, collector_fee)
+		self.erc20_safe_transfer(asset, msg.sender, collector_fee)
 
 	return performance_fee + collector_fee
 
@@ -700,7 +718,7 @@ def _deposit(
 		priviliged internal func
 	"""
 	assert assets >= self.min_deposit # dev: FUCK PLEBS
-	assert self.total_assets + assets <= self.max_total_assets # dev: Pool max reached
+	assert self.total_assets + assets <= self.max_assets # dev: Pool max reached
 	
 	share_price: uint256 = self._get_share_price()
 	shares: uint256 = assets / share_price
@@ -751,7 +769,7 @@ def _withdraw(
 	self._burn(receiver, shares + withdraw_fee)
 	
 	#  transfer assets to withdrawer
-	assert IERC20(asset).transfer(receiver, assets) # dev: asset.transfer() failed on withdraw
+	self.erc20_safe_transfer(asset, receiver, assets)
 
 	log Withdraw(shares, owner, receiver, msg.sender, assets)
 	log TrackSharePrice(share_price, share_price, self._get_share_APR())
@@ -797,6 +815,43 @@ def _get_max_liquid_assets() -> uint256:
 	# TODO account for RDT locked profits
 	return self.total_assets - self.total_deployed
 
+@pure
+@internal
+def _get_pool_name(name_: String[34]) -> String[50]:
+	return concat(CONTRACT_NAME, ' - ', name_)
+
+
+@pure
+@internal
+def _get_pool_decimals(token: address) -> uint8:
+	"""
+	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
+	@param token 		pool's asset to mimic decimals for pool's token
+	"""
+	success: bool = False
+	asset_decimals: Bytes[8] = b""
+	success, asset_decimals = raw_call(
+		token,
+		_abi_encode(b"",method_id=method_id("decimals()")),
+		max_outsize=8,
+		is_static_call=True,
+		revert_on_failure=False
+	)
+
+	if success:
+		return convert(asset_decimals, uint8)
+	else:
+		return 18
+
+@pure
+@internal
+def _get_pool_symbol(symbol_: String[16]) -> String[18]:
+	"""
+	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
+	@param symbol_	 	custom symbol input by pool creator
+	"""
+	return concat("dd", symbol_)
+
 
 # IERC 3156 Flash Loan functions
 
@@ -833,7 +888,7 @@ def flashLoan(
 	assert amount <= self._get_max_liquid_assets()
 
 	# give them the flashloan
-	IERC20(asset).transfer(msg.sender, amount)
+	self.erc20_safe_transfer(asset, msg.sender, amount)
 
 	fee: uint256 = self._getFlashFee(token, amount)
 	
