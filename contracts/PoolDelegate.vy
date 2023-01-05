@@ -15,6 +15,7 @@ interface IPoolDelegate:
 	def price() -> uint256: view
 
 	# investments
+	def unlock_profits() -> uint256: nonpayable
 	def collect_interest(line: address, id: bytes32) -> uint256: nonpayable
 	def increase_credit( line: address, id: bytes32, amount: uint256) -> bool: nonpayable
 	def set_rates( line: address, id: bytes32, drate: uint128, frate: uint128) -> bool: nonpayable
@@ -34,6 +35,7 @@ interface IPoolDelegate:
 	def update_owner(new_owner_: address) -> bool: nonpayable
 	def update_max_assets(new_max: uint256) -> bool: nonpayable
 	def update_min_deposit(new_min: uint256) -> bool: nonpayable
+	def update_profit_degredation(degradation: uint256): nonpayable
 
 	# fees
 	def update_fee_recipient(newRecipient: address) -> bool: nonpayable
@@ -50,6 +52,8 @@ interface IPoolDelegate:
 
 # @notice LineLib.STATUS.INSOLVENT
 INSOLVENT_STATUS: constant(uint256) = 4
+# @notice 8 decimals. padding when calculating for better accuracy
+PRICE_DECIMALS: constant(uint256) = 10**8
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
 FEE_COEFFICIENT: constant(uint16) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
@@ -65,7 +69,9 @@ API_VERSION: constant(String[7]) = "0.0.001"
 DOMAIN_TYPE_HASH: constant(bytes32) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 # @notice EIP712 permit type hash
 PERMIT_TYPE_HASH: constant(bytes32) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
-
+# TODO rename DEGRADATION_COEFFICIENT
+# rate per block of profit degradation. DEGRADATION_COEFFICIENT is 100% per block
+DEGRADATION_COEFFICIENT: constant(uint256) = 10 ** 18
 
 # IERC20 vars
 name: public(immutable(String[50]))
@@ -83,6 +89,12 @@ allowances: HashMap[address, HashMap[address, uint256]]
 asset: public(immutable(address))
 # total notional amount of underlying token owned by pool (may not be currently held in pool)
 total_assets: public(uint256)
+
+# share price logic stolen from yearn vyper vaults
+# vars - https://github.com/yearn/yearn-vaults/blob/74364b2c33bd0ee009ece975c157f065b592eeaf/contracts/Vault.vy#L239-L242
+last_report: public(uint256)  # block.timestamp of last report
+locked_profit: public(uint256) # how much profit is locked and cant be withdrawn
+locked_profit_degradation: public(uint256) # The rate of degradation in percent per second scaled to 1e18.  DEGRADATION_COEFFICIENT is 100% per block
 
 # IERC2612 Variables
 nonces: public(HashMap[address, uint256])
@@ -188,6 +200,13 @@ def __init__(
 	# IERC4626
 	asset = asset_
 
+	# NOTE: Yearn - set profit to bedistributed every 6 hours
+	# self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
+
+	# NOTE: Debt DAO - set profit to bedistributed every 7 days
+	# 604_800 sec. in 7 days. 50_400 blocks at 12 seconds / block
+	self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
+
 	#ERC2612
 	CACHED_CHAIN_ID = chain.id
 	CACHED_COMAIN_SEPARATOR = self.domain_separator()
@@ -288,6 +307,7 @@ def impair(line: address, id: bytes32) -> (uint256, uint256):
 		self.total_supply -= fees_burned # burn what fees we can
 		self._update_shares(position.principal - (fees_burned * share_price), True)
 		self.accrued_fees = 0
+
 
 	# we deduct lost principal but add gained interest
 	if position.interestRepaid != 0:
@@ -480,8 +500,28 @@ def claim_fees(amount: uint256) -> bool:
 
 	return True
 
+@external
+@nonreentrant("lock")
+def update_profit_degredation(degradation: uint256):
+    """
+    @notice
+        Changes the locked profit degradation.
+    @param degradation The rate of degradation in percent per second scaled to 1e18.
+    """
+    assert msg.sender == self.owner
+    # Since "degradation" is of type uint256 it can never be less than zero
+    assert degradation <= DEGRADATION_COEFFICIENT
+    self.locked_profit_degradation = degradation
+    log UpdateProfitDegredation(degradation) 
+
 
 ### ERC4626 Functions
+
+@external
+@nonreentrant("lock")
+def unlock_profits() -> uint256:
+	return self._unlock_profits()
+
 @external
 @nonreentrant("lock")
 def deposit(assets: uint256, receiver: address) -> uint256:
@@ -812,11 +852,28 @@ def _update_shares(amount: uint256, impair: bool = False):
 	share_price: uint256 = self._get_share_price()
 
 	if impair:
+		# Profit is locked and gradually released per block
+		# NOTE: compute current locked profit and replace with sum of current and new
+		locked_profit_before_loss: uint256 = self._calc_locked_profit() 
+		
+		# reduce total assets held by lost amount
 		self.total_assets -= amount
+		if locked_profit_before_loss > amount: 
+		    self.locked_profit = locked_profit_before_loss - amount
+		else:
+		    self.locked_profit = 0
+		
+		# correct current share price and distributed dividends after eating losses
+		self._unlock_profits()
+
 		# TODO RDT logic
-		# TODO  log RDT rate change
+		# TODO log RDT rate change
 	else:
+		# correct current share price and distributed dividends before updating share valuation
+		self._unlock_profits()
+
 		self.total_assets += amount
+		self.locked_profit += amount
 		# TODO RDT logic
 		# TODO  log RDT rate change
 
@@ -826,11 +883,58 @@ def _update_shares(amount: uint256, impair: bool = False):
 
 @view
 @internal
+def _free_assets() -> uint256:
+    return self.total_assets - self._calc_locked_profit()
+
+
+@view
+@internal
+def _free_shares() -> uint256:
+    return (self.total_assets - self._calc_locked_profit()) / self._get_share_price()
+
+
+# @view
+# @internal
+# def _calc_free_profit() -> uint256:
+#     pct_profit_locked: uint256 = (block.timestamp - self.last_report) * self.locked_profit_degradation
+
+#     if(pct_profit_locked < DEGRADATION_COEFFICIENT):
+#         locked_profit: uint256 = self.locked_profit
+
+
+@view
+@internal
+def _calc_locked_profit() -> uint256:
+    pct_profit_locked: uint256 = (block.timestamp - self.last_report) * self.locked_profit_degradation
+
+    if(pct_profit_locked < DEGRADATION_COEFFICIENT):
+        locked_profit: uint256 = self.locked_profit
+        return locked_profit - (
+                pct_profit_locked
+                * locked_profit
+                / DEGRADATION_COEFFICIENT
+            )
+    else:        
+        return 0
+
+
+@internal
+def _unlock_profits() -> uint256:
+	profits: uint256 = self._calc_locked_profit()
+
+
+	# TODO RDT logic
+	return 0
+
+@view
+@internal
 def _get_share_price() -> uint256:
 	# returns # of assets per share
 
 	# TODO RDT logic
-	return self.total_assets / self.total_supply
+	price: uint256 = self.total_assets / self.total_supply
+	assert price != 0 # prevent division underflow
+	return price
 
 @view
 @internal
@@ -1349,10 +1453,17 @@ event NewPendingOwner:
 	pendingOwner: indexed(address)
 
 event UpdateOwner:
-	owner: address # New active governance
+	owner: indexed(address) # New active governance
 
 event UpdateMinDeposit:
-	depositLimit: uint256 # New active deposit limit
+	minimum: indexed(uint256) # New active deposit limit
 
 event UpdateMaxAssets:
-	assetLimit: uint256 # New active deposit limit
+	maximum: indexed(uint256) # New active deposit limit
+
+event Sweep:
+	token: indexed(address) # New active deposit limit
+	amount: indexed(uint256) # New active deposit limit
+
+event UpdateProfitDegredation:
+	degredation: indexed(uint256)
