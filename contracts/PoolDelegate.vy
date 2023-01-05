@@ -330,10 +330,40 @@ def divest_4626(vault: address, amount: uint256) -> bool:
 	# TODO how do we tell what is principal and what is profit??? need to update total_assets with yield
 	# TBH a wee bit tracky to track all the different places they invested, entry price(s) for each, exit price(s) for each, calc profit over time, etc.
 	log Divest4626(vault, amount, 0)
-	# if balance of 4626 token is 0 but vaults[vault] > 0 then impair(vaults[vault])
+	# if 4626 token balance is 0 but vaults[vault] > 0 then impair(vaults[vault])
+	# if 4626 token balance is > 0 and vaults[vault] == 0 then log profit
 
 	# delegate doesnt earn fees on 4626 strategies to incentivize line investment
 	return True
+
+
+@external
+def sweep(token: address, amount: uint256 = max_value(uint256)):
+    """
+    @notice
+        Removes tokens from this Vault that are not the type of token managed
+        by this Vault. This may be used in case of accidentally sending the
+        wrong kind of token to this Vault.
+        Tokens will be sent to `governance`.
+        This will fail if an attempt is made to sweep the tokens that this
+        Vault manages.
+        This may only be called by governance.
+    @param token The token to transfer out of this vault.
+    @param amount The quantity or tokenId to transfer out.
+    """
+    assert msg.sender == self.owner
+    
+    value: uint256 = amount
+    if value == max_value(uint256):
+        value = IERC20(token).balanceOf(self)
+
+    if token == asset:
+		# recover assets sent directly to pool
+		# Can't be used to steal what this Vault is protecting
+        value = IERC20(asset).balanceOf(self) - self.total_assets
+
+    log Sweep(token, value)
+    self.erc20_safe_transfer(token, self.owner, value)
 
 
 ### Pool Admin
