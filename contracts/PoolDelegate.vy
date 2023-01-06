@@ -162,7 +162,7 @@ def __init__(
   	delegate_: address,
 	asset_: address,
 	name_: String[34],
-	symbol_: String[16],
+	symbol_: String[15],
 	fees_: Fees,
 ):
 	"""
@@ -188,10 +188,7 @@ def __init__(
 	self.fees = fees_
 
 	# IERC20 vars
-	# TODO templatize name/symbol
-	# anme = CONTRACT_NAME + '-' +  name_ = 'Debt DAO Pool - Maven11 DAI'
 	name = self._get_pool_name(name_)
-	# symbol = 'dd' + IERC20Detailed(asset_).symbol + '-' + symbol_ = 'ddDAI-MVN11'
 	symbol = self._get_pool_symbol(symbol_)
 
 	# 4626 recommendation is to mimic decimals of underlying assets so less likely to be conversion errors
@@ -979,12 +976,12 @@ def _get_pool_decimals(token: address) -> uint8:
 
 @pure
 @internal
-def _get_pool_symbol(symbol_: String[16]) -> String[18]:
+def _get_pool_symbol(symbol_: String[15]) -> String[18]:
 	"""
 	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
 	@param symbol_	 	custom symbol input by pool creator
 	"""
-	return concat("dd", symbol_)
+	return concat("ddp", symbol_)
 
 
 # IERC 3156 Flash Loan functions
