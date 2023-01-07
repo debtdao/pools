@@ -1,5 +1,13 @@
 # @version ^0.3.7
 
+"""
+@title 	Debt DAO Lending Pool
+@author Kiba Gateaux
+@desc 	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
+@dev 	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
+"""
+
+
 # interfaces defined at bottom of file
 implements: IERC20
 implements: IERC2612
@@ -380,7 +388,7 @@ def sweep(token: address, amount: uint256 = max_value(uint256)):
         value = IERC20(asset).balanceOf(self) - self.total_assets
 
     log Sweep(token, value)
-    self.erc20_safe_transfer(token, self.owner, value)
+    self._erc20_safe_transfer(token, self.owner, value)
 
 
 ### Pool Admin
@@ -621,24 +629,24 @@ def _transfer(sender: address, receiver: address, amount: uint256) -> bool:
 	return True
 
 @internal
-def _caller_has_approval(owner: address, amount: uint256) -> bool:
-	if msg.sender != owner:
-		allowance: uint256 = self.allowances[owner][msg.sender]
+def _caller_has_approval(_owner: address, _amount: uint256) -> bool:
+	if msg.sender != _owner:
+		allowance: uint256 = self.allowances[_owner][msg.sender]
 		# MAX = unlimited approval (saves an SSTORE)
 		if (allowance < max_value(uint256)):
-			allowance = allowance - amount
-			self.allowances[owner][msg.sender] = allowance
+			allowance = allowance - _amount
+			self.allowances[_owner][msg.sender] = allowance
 			# NOTE: Allows log filters to have a full accounting of allowance changes
-			log Approval(owner, msg.sender, allowance)
+			log Approval(_owner, msg.sender, allowance)
 
 	return True
 
 @internal
-def erc20_safe_transfer(token: address, receiver: address, amount: uint256):
+def _erc20_safe_transfer(_token: address, receiver: address, amount: uint256):
     # Used only to send tokens that are not the type managed by this Vault.
     # HACK: Used to handle non-compliant tokens like USDT
     response: Bytes[32] = raw_call(
-        token,
+        _token,
         concat(
             method_id("transfer(address,uint256)"),
             convert(receiver, bytes32),
@@ -702,6 +710,7 @@ def _calc_and_mint_fee(
 @pure
 def _calc_fee(shares: uint256, fee: uint16) -> uint256:
 	"""
+	@dev	does NOT emit `log FeesGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
 	"""
 	if fee == 0:
 		return 0
@@ -754,10 +763,10 @@ def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uin
 @internal
 def _take_performance_fee(interest_earned: uint256) -> uint256:
 	"""
-		@notice takes total profits earned and takes fees for delegate and compounder
-		@dev fees are stored as shares but input/ouput assets
-		@param interest_earned - total amount of assets claimed from usurious activities
-		@return total amount of assets taken as fees
+	@notice takes total profits earned and takes fees for delegate and compounder
+	@dev fees are stored as shares but input/ouput assets
+	@param interest_earned - total amount of assets claimed from usurious activities
+	@return total amount of assets taken as fees
 	"""
 	share_price: uint256 = self._get_share_price()
 	shares_earned: uint256 = interest_earned / self._get_share_price()
@@ -769,7 +778,7 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 		# only _calc not _mint_and_calc so caller gets collector fees in raw asset for easier mev
 		log FeesGenerated(self, msg.sender, collector_fee, shares_earned, FEE_TYPES.COLLECTOR)
 		self.total_assets -= collector_fee * share_price # use pre-performance fee inflation price for payout
-		self.erc20_safe_transfer(asset, msg.sender, collector_fee)
+		self._erc20_safe_transfer(asset, msg.sender, collector_fee)
 
 	return performance_fee + collector_fee
 
@@ -781,8 +790,8 @@ def _deposit(
 	referrer: address = empty(address)
 ) -> uint256:
 	"""
-		adds shares to a user after depositing into vault
-		priviliged internal func
+	adds shares to a user after depositing into vault
+	priviliged internal func
 	"""
 	assert assets >= self.min_deposit # dev: FUCK PLEBS
 	assert self.total_assets + assets <= self.max_assets # dev: Pool max reached
@@ -836,7 +845,7 @@ def _withdraw(
 	self._burn(receiver, shares + withdraw_fee)
 	
 	#  transfer assets to withdrawer
-	self.erc20_safe_transfer(asset, receiver, assets)
+	self._erc20_safe_transfer(asset, receiver, assets)
 
 	log Withdraw(shares, owner, receiver, msg.sender, assets)
 	log TrackSharePrice(share_price, share_price, self._get_share_APR())
@@ -954,15 +963,15 @@ def _get_pool_name(name_: String[34]) -> String[50]:
 
 @pure
 @internal
-def _get_pool_decimals(token: address) -> uint8:
+def _get_pool_decimals(_token: address) -> uint8:
 	"""
 	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
-	@param token 		pool's asset to mimic decimals for pool's token
+	@param _token 		pool's asset to mimic decimals for pool's token
 	"""
 	success: bool = False
 	asset_decimals: Bytes[8] = b""
 	success, asset_decimals = raw_call(
-		token,
+		_token,
 		_abi_encode(b"",method_id=method_id("decimals()")),
 		max_outsize=8,
 		is_static_call=True,
@@ -976,56 +985,56 @@ def _get_pool_decimals(token: address) -> uint8:
 
 @pure
 @internal
-def _get_pool_symbol(symbol_: String[15]) -> String[18]:
+def _get_pool_symbol(_symbol: String[15]) -> String[18]:
 	"""
 	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
-	@param symbol_	 	custom symbol input by pool creator
+	@param _symbol	 	custom symbol input by pool creator
 	"""
-	return concat("ddp", symbol_)
+	return concat("ddp", _symbol)
 
 
 # IERC 3156 Flash Loan functions
 
 @view
 @external
-def maxFlashLoan(token: address) -> uint256:
-	if token != asset:
+def maxFlashLoan(_token: address) -> uint256:
+	if _token != asset:
 		return 0
 	else:
 		return self._get_max_liquid_assets()
 
 @view
 @internal
-def _getFlashFee(token: address, amount: uint256) -> uint256:
+def _getFlashFee(_token: address, _amount: uint256) -> uint256:
 	if self.fees.flash == 0:
 		return 0
 	else:
-		return self._get_max_liquid_assets() * convert(self.fees.flash / FEE_COEFFICIENT, uint256)
+		return self._calc_fee(min(_amount, self._get_max_liquid_assets()), self.fees.flash)
 
 @view
 @external
-def flashFee(token: address, amount: uint256) -> uint256:
-	assert token == asset
-	return self._getFlashFee(token, amount)
+def flashFee(_token: address, _amount: uint256) -> uint256:
+	assert _token == asset
+	return self._getFlashFee(_token, _amount)
 
 @external
 @nonreentrant("lock")
 def flashLoan(
 	receiver: address,
-	token: address,
+	_token: address,
 	amount: uint256,
 	data: Bytes[25000]
 ) -> bool:
 	assert amount <= self._get_max_liquid_assets()
 
 	# give them the flashloan
-	self.erc20_safe_transfer(asset, msg.sender, amount)
+	self._erc20_safe_transfer(asset, msg.sender, amount)
 
-	fee: uint256 = self._getFlashFee(token, amount)
+	fee: uint256 = self._getFlashFee(_token, amount)
 	
 	# ensure they can receive flash loan
 	# TODO says onFlashLoan not on interface
-	assert IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender, token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan")
+	assert IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender, _token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan")
 	
 	# receive payment
 	IERC20(asset).transferFrom(msg.sender, self, amount + fee)
@@ -1158,19 +1167,19 @@ def price() -> uint256:
 
 @external
 @view
-def convertToShares(assets: uint256) -> uint256:
-	return assets * (self.total_assets / self.total_supply)
+def convertToShares(_assets: uint256) -> uint256:
+	return _assets * (self.total_assets / self.total_supply)
 
 
 @external
 @view
-def convertToAssets(shares: uint256) -> uint256:
-	return shares * (self.total_supply / self.total_assets)
+def convertToAssets(_shares: uint256) -> uint256:
+	return _shares * (self.total_supply / self.total_assets)
 
 
 @external
 @view
-def maxDeposit(receiver: address) -> uint256:
+def maxDeposit(_receiver: address) -> uint256:
 	"""
 		add assets
 	"""
@@ -1178,12 +1187,12 @@ def maxDeposit(receiver: address) -> uint256:
 
 @external
 @view
-def maxMint(receiver: address) -> uint256:
+def maxMint(_receiver: address) -> uint256:
 	return (max_value(uint256) - self.total_assets) / self._get_share_price()
 
 @external
 @view
-def maxWithdraw(owner: address) -> uint256:
+def maxWithdraw(_owner: address) -> uint256:
 	"""
 		remove shares
 	"""
@@ -1192,7 +1201,7 @@ def maxWithdraw(owner: address) -> uint256:
 
 @external
 @view
-def maxRedeem(owner: address) -> uint256:
+def maxRedeem(_owner: address) -> uint256:
 	"""
 		remove assets
 	"""
@@ -1200,38 +1209,38 @@ def maxRedeem(owner: address) -> uint256:
 
 @external
 @view
-def previewDeposit(assets: uint256) -> uint256:
+def previewDeposit(_assets: uint256) -> uint256:
 	"""
 	@notice		Returns max amount that can be deposited which is min(maxDeposit, userRequested)
 				So if assets > maxDeposit then it returns maxDeposit
 	@dev 
 	"""
 	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(max_value(uint256) - self.total_assets, assets) / share_price
+	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _assets) / share_price
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return free_shares - self._calc_fee(assets / share_price, self.fees.deposit)
+	return free_shares - self._calc_fee(_assets / share_price, self.fees.deposit)
 
 @external
 @view
-def previewMint(shares: uint256) -> uint256:
+def previewMint(_shares: uint256) -> uint256:
 	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(max_value(uint256) - self.total_assets, shares * share_price)
+	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _shares * share_price)
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
 	return (free_shares - self._calc_fee(free_shares, self.fees.deposit)) * share_price
 
 @external
 @view
-def previewWithdraw(assets: uint256) -> uint256:
+def previewWithdraw(_assets: uint256) -> uint256:
 	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(self._get_max_liquid_assets(), (max_value(uint256) - assets)) / share_price
+	free_shares: uint256 = min(self._get_max_liquid_assets(), (max_value(uint256) - _assets)) / share_price
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return free_shares - self._calc_fee(assets / share_price, self.fees.withdraw)
+	return free_shares - self._calc_fee(_assets / share_price, self.fees.withdraw)
 
 @external
 @view
-def previewRedeem(shares: uint256) -> uint256:
+def previewRedeem(_shares: uint256) -> uint256:
 	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(self._get_max_liquid_assets(), shares * share_price)
+	free_shares: uint256 = min(self._get_max_liquid_assets(), _shares * share_price)
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
 	return (free_shares - self._calc_fee(free_shares, self.fees.withdraw)) * share_price
 
@@ -1241,6 +1250,8 @@ def previewRedeem(shares: uint256) -> uint256:
 from vyper.interfaces import ERC20 as IERC20
 
 interface IERC2612:
+	# TODO: standard permit interface. Need to change yearn code for it.
+    # def permit(owner: address, spender: address, amount: uint256, deadline: uint256, v: uint8, r: bytes32, s: bytes32) -> bool: nonpayable
     def permit(owner: address, spender: address, amount: uint256, deadline: uint256, signature: Bytes[65]) -> bool: nonpayable
     def nonces(owner: address ) -> uint256: view
     def DOMAIN_SEPARATOR() -> bytes32: view
