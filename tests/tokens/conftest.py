@@ -1,49 +1,53 @@
-import boa
-import pytest
-from math import log
+# import pytest
+# from ape import Contract
+# from eip712.messages import EIP712Message
 
-boa.interpret.set_cache_dir()
-boa.reset_env()
+# boa.interpret.set_cache_dir()
+# boa.reset_env()
 
+# boa/ape test references
+# https://github.com/ApeAcademy/ERC20/blob/main/%7B%7Bcookiecutter.project_name%7D%7D/tests/conftest.py
 
-PRICE = 3000
+# get token, user balances and pass on. 
+# used to test mintin, burning, transfering, etc.
 
-
-def approx(x1, x2, precision, abs_precision=None):
-    result = False
-    if abs_precision is not None:
-        result = abs(x2 - x1) <= abs_precision
-    if x2 == 0:
-        return x1 == 0
-    elif x1 == 0:
-        return x2 == 0
-    return result or (abs(log(x1 / x2)) <= precision)
-
-
-@pytest.fixture(scope="session")
-def accounts():
-    return [boa.env.generate_address() for i in range(10)]
-
-
-@pytest.fixture(scope="session")
-def admin():
-    return boa.env.generate_address()
-
-@pytest.fixture(scope="module")
-def asset_token(admin):
-    with boa.env.prank(admin):
-        return boa.load('contracts/testing/ERC20Mock.vy', "Lending Asset", "WETH", 18)
-
+# @given
+# def test_token_balances()
 
 
 # @pytest.fixture(scope="module")
-# def collateral_token(admin):
-#     with boa.env.prank(admin):
-#         return boa.load('contracts/testing/ERC20Mock.vy', "Collateral", "ETH", 18)
+# def Permit(chain, token):
+#     class Permit(EIP712Message):
+#         _name_  = "Lending Token" #: "string"
+#         _version_  ="1.0" #: "string"
+#         _chainId_  = chain.chain_id #: "uint256"
+#         _verifyingContract_  = token.address #: "address"
+
+#         # owner  : "address"
+#         # spender  : "address"
+#         # value  : "uint256"
+#         # nonce  : "uint256"
+#         # deadline  : "uint256"
+
+#     return Permit
 
 
-# @pytest.fixture(scope="session")
-# def price_oracle(admin):
-#     with boa.env.prank(admin):
-#         oracle = boa.load('contracts/testing/DummyPriceOracle.vy', admin, PRICE * 10**18)
-#         return oracle
+# @pytest.fixture(scope="module")
+# def owner(accounts):
+#     return accounts[0]
+
+# @pytest.fixture(scope="module")
+# def receiver(accounts):
+#     return accounts[1]
+
+# @pytest.fixture(scope="module")
+# def asset(token):
+#     return Contract(token.asset())
+
+# @pytest.fixture(scope="module")
+# def token(owner, project, token):
+#     # todo change to `ape.reverts():` ?
+#     try:
+#         return owner.deploy(project.Token, token.asset())
+#     finally:
+#         return owner.deploy(project.Token, token)

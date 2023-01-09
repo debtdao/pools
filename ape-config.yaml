@@ -1,9 +1,9 @@
-name: curve-dao-operations
+name: dbet-dao-pools
 
 plugins:
   - name: vyper
   - name: alchemy
-  - name: hardhat
+  - name: hardhat 
   - name: ledger
   - name: etherscan
 
