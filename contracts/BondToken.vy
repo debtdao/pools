@@ -1,7 +1,7 @@
 # @version 0.3.7
-"""
-@notice Simple ERC20 for tracking Chicken Bond tokens. Only controllable by chicken bond manager
-"""
+# """
+# @notice Simple ERC20 for tracking Chicken Bond tokens. Only controllable by chicken bond manager
+# """
 
 event Transfer:
     _from: indexed(address)
@@ -13,21 +13,21 @@ event Approval:
     _spender: indexed(address)
     _value: uint256
 
-name: public(String[64])
-symbol: public(String[32])
-decimals: public(uint256)
+name: immutable(String[64])
+symbol: immutable(String[32])
+decimals: immutable(uint256)
 balanceOf: public(HashMap[address, uint256])
 allowances: HashMap[address, HashMap[address, uint256]]
 total_supply: uint256
 
-manager: public(immutable(address))
+manager: immutable(address)
 
 @external
 def __init__(_name: String[64], _symbol: String[32], _decimals: uint256, manager_: address):
     manager = manager_
-    self.name = _name
-    self.symbol = _symbol
-    self.decimals = _decimals
+    name = _name
+    symbol = _symbol
+    decimals = _decimals
 
 
 @external

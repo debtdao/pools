@@ -1,12 +1,12 @@
 # @version ^0.3.7
 
 
-"""
-@title 	Debt DAO Lending Pool Factory
-@author Kiba Gateaux
-@desc 	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
-@dev 	Automiatically deploys a chicken bond for each new pool.
-"""
+# """
+# @title 	Debt DAO Lending Pool Factory
+# @author Kiba Gateaux
+# @notice Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
+# @dev 	Automiatically deploys a chicken bond for each new pool.
+# """
 
 struct Fees: # from PoolDelegate.vy
 	performance: uint16
@@ -24,7 +24,7 @@ interface CurveFactory:
 
 interface IERC20:
      def decimals() -> uint8: nonpayable
-     def _symbol() -> String[18]: nonpayable
+     def symbol() -> String[18]: nonpayable
 
 interface ERC4626:
     def deposit(): nonpayable
@@ -54,19 +54,20 @@ event EthListChanged:
     new_list: DynArray[address, MAX_TOKEN_PER_CLASS]
 
 # default Debt DAO Pool init config
-DEFAULT_REFERRAL_FEE: constant(uint16) = 20 # 20 bps, 0.2% of deposit goes to incentivizing chicken bond liquidity
 DEFAULT_FLASH_FEE: constant(uint16) = 5     # 5 bps. 0.05% per flashloan. Similar Aave rate.
-# Minimum amounts to instantiate new pool/bond system
-MIN_USD_DELEGATE_STAKE: constant(uint256) = 100_000 # deployer must initialize pool with their own stake
-MIN_ETH_DELEGATE_STAKE: constant(uint256) = 100     # deployer must initialize pool with their own stake
+DEFAULT_REFERRAL_FEE: constant(uint16) = 20 # 20 bps, 0.2% of deposit goes to incentivizing chicken bond liquidity
+# Minimum amounts to deposit from deployer to instantiate new pool/bond system
+MIN_ETH_DELEGATE_STAKE: constant(uint256) = 100
+MIN_USD_DELEGATE_STAKE: constant(uint256) = 100_000
 
 DEFAULT_CRV_A: constant(uint256) = 6 # A = 6. Not pegged assets
 DEFAULT_CRV_FEE: constant(uint256) = 15000000 # 0.15%. 10 decimals
 CRV_POOL_FACTORY: constant(address) = 0xB9fC157394Af804a3578134A6585C0dc9cc990d4
+# TODO make bLUDS-LUSD-3pool ? Nah having synths in every pool makes it way more lit.
 CRV_META_POOL_USD: constant(address) = 0xA5407eAE9Ba41422680e2e00537571bcC53efBfD # susdv2 pool
 CRV_META_POOL_ETH: constant(address) = 0xc5424B857f758E906013F3555Dad202e4bdB4567 # sETH pool
 
-MAX_TOKEN_PER_CLASS: constant(uint256) = 20
+MAX_TOKEN_PER_CLASS: constant(uint256) = 5
 
 ETHLIKE_COINS: public(DynArray[address, MAX_TOKEN_PER_CLASS])
 USD_SHITCOINS: public(DynArray[address, MAX_TOKEN_PER_CLASS])
@@ -149,11 +150,12 @@ def deploy_pool(_owner: address, _token: address, _name: String[50], _symbol: St
 @internal
 def _assert_initial_deposit(_base_token: address, _initial_deposit: uint256):
     isUSD: bool = CRV_META_POOL_USD == self._get_meta_pool_for_base_token(_base_token)
+    normalized_val: uint256 = _initial_deposit / (10 ** convert(IERC20(_base_token).decimals(), uint256))
 
     if isUSD:
-        assert _initial_deposit >= MIN_USD_DELEGATE_STAKE
+        assert normalized_val >= MIN_USD_DELEGATE_STAKE
     else:
-        assert _initial_deposit >= MIN_ETH_DELEGATE_STAKE
+        assert normalized_val >= MIN_ETH_DELEGATE_STAKE
 
     self._erc20_safe_transfer(_base_token, self, _initial_deposit)
 
@@ -213,7 +215,7 @@ def _deploy_crv_pools(base_token: address, ddp_token: address, bddp_token: addre
                     Deploys a new CRV pool with ddp + bddp token. Tries to find a base pool to match them with
     @param pool     Pool to deploy chicken bond for
     @param token    Token that pool and chicjken bond are denominated in
-    @returns        bond_crv_pool - Pool where newly deployed bond token can be traded.
+    @return        bond_crv_pool - Pool where newly deployed bond token can be traded.
                     meta_crv_pool - May be null. Crv pool that bond token is paired with for deeper liquidity
     """
     meta_pool: address = self._get_meta_pool_for_base_token(base_token)
@@ -255,12 +257,14 @@ def _seed_all_pools(base_token: address, ddp_token: address, bddp_token: address
     alloc_per_pool: uint256[12] = [0,0,0,0,0,0,0,0,0,0,0,0]
 
     if ddp_pool == empty(address):
-        # no metapools, just isolated ddp<>bddp pool
-        bond_deposit: uint256 = initial_deposit / 2
+        # no metapools, just isolated base_token<>ddp<>bddp pool
+        bond_deposit: uint256 = initial_deposit / 3
         # raw_call(bond_manager, )
 
         # X % - meta pool (mp) - 50% ddp 50% bddp
-    
+    else:
+        bond_deposit: uint256 = initial_deposit / 2
+        instant_mint_fee: uint256 = bond_deposit * 20 / 100 # TODO maanger.get_instant_mint_fee
 
     # 25 % - credit pool (ddp) - 100% bt
     

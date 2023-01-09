@@ -1,12 +1,11 @@
 # @version ^0.3.7
 
-"""
-@title 	Debt DAO Lending Pool
-@author Kiba Gateaux
-@desc 	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
-@dev 	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
-"""
-
+# """
+# @title 	Debt DAO Lending Pool
+# @author Kiba Gateaux
+# @desc 	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
+# @dev 	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
+# """
 
 # interfaces defined at bottom of file
 implements: IERC20
@@ -100,8 +99,8 @@ total_assets: public(uint256)
 
 # share price logic stolen from yearn vyper vaults
 # vars - https://github.com/yearn/yearn-vaults/blob/74364b2c33bd0ee009ece975c157f065b592eeaf/contracts/Vault.vy#L239-L242
-last_report: public(uint256)  # block.timestamp of last report
-locked_profit: public(uint256) # how much profit is locked and cant be withdrawn
+last_report: public(uint256) 	# block.timestamp of last report
+locked_profit: public(uint256) 	# how much profit is locked and cant be withdrawn
 locked_profit_degradation: public(uint256) # The rate of degradation in percent per second scaled to 1e18.  DEGRADATION_COEFFICIENT is 100% per block
 
 # IERC2612 Variables
@@ -167,43 +166,43 @@ fees: public(Fees)
 
 @external
 def __init__(
-  	delegate_: address,
-	asset_: address,
-	name_: String[34],
-	symbol_: String[15],
-	fees_: Fees,
+  	_delegate: address,
+	_asset: address,
+	_name: String[34],
+	_symbol: String[15],
+	_fees: Fees,
 ):
 	"""
 	@dev configure data for contract owners and initial revenue contracts.
 		Owner/operator/treasury can all be the same address
-	@param delegate_	who will own and control the pool
-	@param asset_ 		ERC20 token to deposit and lend. Must verify asset is supported by oracle on Lines you want to invest in.
-	@param name_ 		custom pool name. first 0-13 chars are templated  "Debt DAO Pool - {name_}"
-	@param symbol_ 		custom pool symbol. first 5 chars are templated  "dd{token.symbol}-{symbol_}"
-	@param fees 		fees to charge on pool
+	@param _delegate	who will own and control the pool
+	@param _asset 		ERC20 token to deposit and lend. Must verify asset is supported by oracle on Lines you want to invest in.
+	@param _name 		custom pool name. first 0-13 chars are templated  "Debt DAO Pool - {_name}"
+	@param _symbol 		custom pool symbol. first 5 chars are templated  "dd{token.symbol}-{_symbol}"
+	@param _fees 		fees to charge on pool
 	"""
 	self.owner = msg.sender # set owner to deployer for validation functions
-	assert delegate_ != empty(address)
-	assert self._assert_max_fee(fees_.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
-	assert self._assert_pittance_fee(fees_.collector, FEE_TYPES.COLLECTOR)
-	assert self._assert_pittance_fee(fees_.flash, FEE_TYPES.FLASH)
-	assert self._assert_pittance_fee(fees_.referral, FEE_TYPES.REFERRAL)
-	assert self._assert_pittance_fee(fees_.deposit, FEE_TYPES.DEPOSIT)
-	assert self._assert_pittance_fee(fees_.withdraw, FEE_TYPES.WITHDRAW)
+	assert _delegate != empty(address)
+	assert self._assert_max_fee(_fees.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
+	assert self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
+	assert self._assert_pittance_fee(_fees.flash, FEE_TYPES.FLASH)
+	assert self._assert_pittance_fee(_fees.referral, FEE_TYPES.REFERRAL)
+	assert self._assert_pittance_fee(_fees.deposit, FEE_TYPES.DEPOSIT)
+	assert self._assert_pittance_fee(_fees.withdraw, FEE_TYPES.WITHDRAW)
 
 	# Setup Pool variables
-	self.owner = delegate_
-	self.fees = fees_
+	self.owner = _delegate
+	self.fees = _fees
 
 	# IERC20 vars
-	name = self._get_pool_name(name_)
-	symbol = self._get_pool_symbol(symbol_)
+	name = self._get_pool_name(_name)
+	symbol = self._get_pool_symbol(_symbol)
 
 	# 4626 recommendation is to mimic decimals of underlying assets so less likely to be conversion errors
 	# TODO what happens if asset_ hs no decimals? revert if decimals fails
-	decimals = IERC20Detailed(asset_).decimals()
+	decimals = IERC20Detailed(_asset).decimals()
 	# IERC4626
-	asset = asset_
+	asset = _asset
 
 	# NOTE: Yearn - set profit to bedistributed every 6 hours
 	# self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
@@ -213,7 +212,7 @@ def __init__(
 	self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
 	#ERC2612
-	CACHED_CHAIN_ID = chain.id
+	CACHED_CHAIN_ID = chain.id # cache before compute
 	CACHED_COMAIN_SEPARATOR = self.domain_separator()
 
 
@@ -531,7 +530,7 @@ def unlock_profits() -> uint256:
 @nonreentrant("lock")
 def deposit(assets: uint256, receiver: address) -> uint256:
 	"""
-		@returns - shares
+		@return - shares
 	"""
 	return self._deposit(assets, receiver)
 
@@ -539,7 +538,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 @nonreentrant("lock")
 def depositWithReferral(assets: uint256, receiver: address, referrer: address) -> uint256:
 	"""
-		@returns - shares
+		@return - shares
 	"""
 	return self._deposit(assets, receiver, referrer)
 
@@ -547,7 +546,7 @@ def depositWithReferral(assets: uint256, receiver: address, referrer: address) -
 @nonreentrant("lock")
 def mint(shares: uint256, receiver: address) -> uint256:
 	"""
-		@returns - assets
+		@return - assets
 	"""
 	share_price: uint256 = self._get_share_price()
 	return self._deposit(shares * share_price, receiver) * share_price
@@ -556,7 +555,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
 @nonreentrant("lock")
 def mintWithReferral(shares: uint256, receiver: address, referrer: address) -> uint256:
 	"""
-		@returns - assets
+		@return - assets
 	"""
 	share_price: uint256 = self._get_share_price()
 	return self._deposit(shares * share_price, receiver, referrer) * share_price
@@ -569,7 +568,7 @@ def withdraw(
 	owner: address
 ) -> uint256:
 	"""
-		@returns - shares
+		@return - shares
 	"""
 	return self._withdraw(assets, owner, receiver)
 
@@ -577,7 +576,7 @@ def withdraw(
 @nonreentrant("lock")
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
 	"""
-		@returns - assets
+		@return - assets
 	"""
 	share_price: uint256 = self._get_share_price()
 	return self._withdraw(shares * share_price, owner, receiver) * share_price
@@ -721,7 +720,7 @@ def _calc_fee(shares: uint256, fee: uint16) -> uint256:
 def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uint256):
 	"""
 	@notice		withdraw deposit and/or interest from an external position
-	@returns 	(initial principal withdrawn, usurious interest earned)
+	@return 	(initial principal withdrawn, usurious interest earned)
 	"""
 	withdrawable: uint256 = amount
 	interest: uint256 = 0
@@ -957,8 +956,8 @@ def _get_max_liquid_assets() -> uint256:
 
 @pure
 @internal
-def _get_pool_name(name_: String[34]) -> String[50]:
-	return concat(CONTRACT_NAME, ' - ', name_)
+def _get_pool_name(_name: String[34]) -> String[50]:
+	return concat(CONTRACT_NAME, ' - ', _name)
 
 
 @pure
@@ -993,7 +992,33 @@ def _get_pool_symbol(_symbol: String[15]) -> String[18]:
 	return concat("ddp", _symbol)
 
 
-# IERC 3156 Flash Loan functions
+# 	 IERC 3156 Flash Loan functions
+# 
+#                    .-~*~--,.   .-.
+#           .-~-. ./OOOOOOOOO\.'OOO`9~~-.
+#         .`OOOOOO.OOM.OLSONOOOOO@@OOOOOO\
+#        /OOOO@@@OO@@@OO@@@OOO@@@@@@@@OOOO`.
+#        |OO@@@WWWW@@@@OOWWW@WWWW@@@@@@@OOOO).
+#      .-'OO@@@@WW@@@W@WWWWWWWWOOWW@@@@@OOOOOO}
+#     /OOO@@O@@@@W@@@@@OOWWWWWOOWOO@@@OOO@@@OO|
+#    lOOO@@@OO@@@WWWWWWW\OWWWO\WWWOOOOOO@@@O.'
+#     \OOO@@@OOO@@@@@@OOW\     \WWWW@@@@@@@O'.
+#      `,OO@@@OOOOOOOOOOWW\     \WWWW@@@@@@OOO)
+#       \,O@@@@@OOOOOOWWWWW\     \WW@@@@@OOOO.'
+#         `~c~8~@@@@WWW@@W\       \WOO|\UO-~'
+#              (OWWWWWW@/\W\    ___\WO)
+#                `~-~''     \   \WW=*'
+#                          __\   \
+#                          \      \
+#                           \    __\
+#                            \  \
+#                             \ \
+#                              \ \
+#                               \\
+#                                \\
+#                                 \
+#                                  \
+#
 
 @view
 @external
@@ -1213,7 +1238,8 @@ def previewDeposit(_assets: uint256) -> uint256:
 	"""
 	@notice		Returns max amount that can be deposited which is min(maxDeposit, userRequested)
 				So if assets > maxDeposit then it returns maxDeposit
-	@dev 
+	@dev 		INCLUSIVE of deposit fees (should be same as without deposit fees bc of mintflation)
+	@return 	shares returned when minting _assets
 	"""
 	share_price: uint256 =  self._get_share_price()
 	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _assets) / share_price
@@ -1223,6 +1249,12 @@ def previewDeposit(_assets: uint256) -> uint256:
 @external
 @view
 def previewMint(_shares: uint256) -> uint256:
+	"""
+	@notice		Returns max amount that can be deposited which is min(maxDeposit, userRequested)
+				So if assets > maxDeposit then it returns maxDeposit
+	@dev 		INCLUSIVE of deposit fees (should be same as without deposit fees bc of mintflation)
+	@return 	assets required to mint _shares
+	"""
 	share_price: uint256 =  self._get_share_price()
 	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _shares * share_price)
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
@@ -1245,7 +1277,15 @@ def previewRedeem(_shares: uint256) -> uint256:
 	return (free_shares - self._calc_fee(free_shares, self.fees.withdraw)) * share_price
 
 
-### Interfaces
+# 88                                            ad88                                   
+# ""              ,d                           d8"                                     
+#                 88                           88                                      
+# 88 8b,dPPYba, MM88MMM ,adPPYba, 8b,dPPYba, MM88MMM ,adPPYYba,  ,adPPYba,  ,adPPYba,  
+# 88 88P'   `"8a  88   a8P_____88 88P'   "Y8   88    ""     `Y8 a8"     "" a8P_____88  
+# 88 88       88  88   8PP""""""" 88           88    ,adPPPPP88 8b         8PP"""""""  
+# 88 88       88  88,  "8b,   ,aa 88           88    88,    ,88 "8a,   ,aa "8b,   ,aa  
+# 88 88       88  "Y888 `"Ybbd8"' 88           88    `"8bbdP"Y8  `"Ybbd8"'  `"Ybbd8"'  
+                                                                                     
 
 from vyper.interfaces import ERC20 as IERC20
 
