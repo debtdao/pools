@@ -33,6 +33,11 @@ foundry:
   test:
       uri: http://localhost:8545 # anvil mainnet fork
 
+test:
+  default_network: foundry
+  test:
+      uri: http://localhost:8545 # anvil mainnet fork
+
 # foundry:
 #   ethereum:
 # #     mainnet:

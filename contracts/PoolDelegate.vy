@@ -14,6 +14,8 @@ TODO -
 2. add IERC4626RP (referral + permit)
 3. Make sure using appropriate instances of total_assets, total_deployed, liquid_assets, owned_assets, etc. in state updates and price algorithms
 4. add dev: revert strings to all asserts
+5. understand how DEGREDATION_COEFFICIENT works
+6. implement _get_share_APR()
 """
 
 # interfaces defined at bottom of file
@@ -90,9 +92,9 @@ PERMIT_TYPE_HASH: constant(bytes32) = keccak256("Permit(address owner,address sp
 DEGRADATION_COEFFICIENT: constant(uint256) = 10 ** 18
 
 # IERC20 vars
-name: public(immutable(String[50]))
-symbol: public(immutable(String[18]))
-decimals: public(immutable(uint8))
+NAME: public(immutable(String[50]))
+SYMBOL: public(immutable(String[18]))
+DECIMALS: public(immutable(uint8))
 # total amount of shares in pool
 total_supply: public(uint256)
 # balance of pool vault shares
@@ -207,13 +209,13 @@ def __init__(
 	self.fees = _fees
 
 	# IERC20 vars
-	name = self._get_pool_name(_name)
-	symbol = self._get_pool_symbol(_asset, _symbol)
+	NAME = self._get_pool_name(_name)
+	SYMBOL = self._get_pool_symbol(_asset, _symbol)
 
 	# MUST use same decimals as `asset` token. revert if call fails
 	# We do not account for differening token decimals in our math
-	decimals = IERC20Detailed(_asset).decimals()
-	assert decimals != 0
+	DECIMALS = IERC20Detailed(_asset).decimals()
+	assert DECIMALS != 0
 
 	# IERC4626
 	asset = _asset
@@ -221,8 +223,8 @@ def __init__(
 	# NOTE: Yearn - set profit to bedistributed every 6 hours
 	# self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
-	# NOTE: Debt DAO - set profit to bedistributed every 7 days
-	# 604_800 sec. in 7 days. 50_400 blocks at 12 seconds / block
+	# TODO: Debt DAO - set profit to bedistributed to every `1 eek` (ethereum week)
+	# 2048 epochs = 2048 blocks = COEFFICIENT / 2048 / 10 ** 6 ???
 	self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
 	#ERC2612
@@ -266,11 +268,17 @@ def set_rates(line: address, id: bytes32, drate: uint128, frate: uint128) -> boo
 @external
 @nonreentrant("lock")
 def collect_interest(line: address, id: bytes32) -> uint256:
-  return self._reduce_credit(line, id, 0)[1]
+	"""
+	@notice
+		Anyone can claim interest from active lines and start vesting profits into pool shares
+	@return
+		Amount of assets earned in usury
+	"""
+	return self._reduce_credit(line, id, 0)[1]
 
 @external
 @nonreentrant("lock")
-def escape(line: address, id: bytes32) -> (uint256, uint256):
+def abort(line: address, id: bytes32) -> (uint256, uint256):
 	"""
 	@notice emergency cord to remove all avialable funds from a line (deposit + interestRepaid)
 	"""
@@ -610,6 +618,7 @@ def mint(_shares: uint256, _receiver: address) -> uint256:
 		@return - assets
 	"""
 	share_price: uint256 = self._get_share_price()
+	# TODO TEST https://github.com/fubuloubu/ERC4626/blob/55e22a6757b79abf733bfcaef8d1096311a5314f/contracts/VyperVault.vy#L181-L182
 	return self._deposit(_shares * share_price, _receiver) * share_price
 
 @external
@@ -900,6 +909,7 @@ def _withdraw(
 
 	share_price: uint256 = self._get_share_price()
 	shares: uint256 = assets / share_price
+	# TODO TEST  https://github.com/fubuloubu/ERC4626/blob/55e22a6757b79abf733bfcaef8d1096311a5314f/contracts/VyperVault.vy#L214-L216
 
 	# TODO test how  withdraw fee inflatino affects the shares/asssets that they are *supposed* to lose
 		
@@ -1256,6 +1266,23 @@ def permit(owner: address, spender: address, amount: uint256, deadline: uint256,
 
 
 # IERC20 view functions
+
+@view
+@external
+def name() -> String[50]:
+    return NAME
+
+
+@view
+@external
+def symbol() -> String[18]:
+    return SYMBOL
+
+
+@view
+@external
+def decimals() -> uint8:
+    return DECIMALS
 
 @external
 @view
