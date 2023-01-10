@@ -36,29 +36,30 @@
 # # invairants around total supply with mint/burn
 
 # # Standard test comes from the interpretation of EIP-20
-# ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
+# https://docs.apeworx.io/ape/stable/methoddocs/managers.html?highlight=project#module-ape.managers.project.manager
 
-# def test_initial_state(lending_token, owner):
-#     """
-#     Test inital state of the contract.
-#     """
-#     # Check the token meta matches the deployment
-#     # token.method_name() has access to all the methods in the smart contract.
-#     assert lending_token.name() == "Lending Token"
-#     assert lending_token.symbol() == "LEND"
-#     assert lending_token.decimals() == 18
+def test_initial_state(lending_token, owner):
+    """
+    Test inital state of the contract.
+    """
+    # Check the token meta matches the deployment
+    # token.method_name() has access to all the methods in the smart contract.
+    assert lending_token.name() == "Lending Token"
+    assert lending_token.symbol() == "LEND"
+    assert lending_token.decimals() == 18
 
-#     # Check of intial state of authorization
-#     # assert token.owner() == owner
+    # Check of intial state of authorization
+    # assert token.owner() == owner
 
-#     # Check intial balance of tokens
-#     # {%- if cookiecutter.premint == 'y' %}
-#     #     assert token.totalSupply() == {{cookiecutter.premint_amount}}
-#     #     assert token.balanceOf(owner) == {{cookiecutter.premint_amount}}
-#     # {%- else %}
-#     #     assert token.totalSupply() == 1000
-#     #     assert token.balanceOf(owner) == 1000
+    # Check intial balance of tokens
+    # {%- if cookiecutter.premint == 'y' %}
+    #     assert token.totalSupply() == {{cookiecutter.premint_amount}}
+    #     assert token.balanceOf(owner) == {{cookiecutter.premint_amount}}
+    # {%- else %}
+    #     assert token.totalSupply() == 1000
+    #     assert token.balanceOf(owner) == 1000
 
 
 # def test_transfer(token, owner, receiver):

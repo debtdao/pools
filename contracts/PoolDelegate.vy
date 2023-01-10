@@ -242,7 +242,7 @@ def increase_credit(line: address, id: bytes32, amount: uint256) -> bool:
 	self._assert_delegate_has_available_funds(amount)
 
 	self.total_deployed += amount
-	
+
 	# NOTE: no need to log, Line emits events already
 	return ISecuredLine(line).increaseCredit(id, amount)
 
@@ -256,6 +256,15 @@ def set_rates(line: address, id: bytes32, drate: uint128, frate: uint128) -> boo
 @nonreentrant("lock")
 def collect_interest(line: address, id: bytes32) -> uint256:
   return self._reduce_credit(line, id, 0)[1]
+
+@external
+@nonreentrant("lock")
+def escape(line: address, id: bytes32) -> (uint256, uint256):
+	"""
+	@notice emergency cord to remove all avialable funds from a line (deposit + interestRepaid)
+	"""
+	assert msg.sender == self.owner
+	return self._reduce_credit(line, id, max_value(uint256))
 
 @external
 @nonreentrant("lock")
@@ -691,11 +700,11 @@ def _calc_and_mint_fee(
 	if(fees != 0):
 		if(to == self.owner):
 			# store delegate fees so we can slash if neccessary
-			assert self._mint(self, fees, fees / self._get_share_price())
+			assert self._mint(self, fees, fees * self._get_share_price())
 			self.accrued_fees += fees
 		else:
 			# mint other ecosystem participants fees to them directly
-			assert self._mint(to, fees, fees / self._get_share_price())
+			assert self._mint(to, fees, fees * self._get_share_price())
 		
 	log FeesGenerated(payer, to, fees, shares, feeType)
 	return fees
@@ -932,13 +941,11 @@ def _get_share_price() -> uint256:
 	@return
 		# of assets per share. denominated in pool/asset decimals (MUST be the same)
 	"""
+	# no share price if nothing minted/deposited
+	if self.total_supply == 0 or self.total_assets == 0:
+		return 0
 
-	# logic pulled from Yearn's Vault.vy _calculateLockedProfit & report() function
-
-	price: uint256 = (self.total_assets - self._calc_locked_profit()) / self.total_supply
-
-	assert price != 0 # prevent division underflow
-	return price
+	return (self.total_assets - self._calc_locked_profit()) / self.total_supply
 
 @view
 @internal
