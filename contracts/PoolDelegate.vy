@@ -177,25 +177,24 @@ def __init__(
   	_delegate: address,
 	_asset: address,
 	_name: String[34],
-	_symbol: String[15],
+	_symbol: String[9],
 	_fees: Fees,
 ):
 	"""
-	@dev configure data for contract owners and initial revenue contracts.
-		Owner/operator/treasury can all be the same address
+	@notice				A generalized pooling contact to aggregate deposits and lend to trustless lines of credit
 	@param _delegate	who will own and control the pool
 	@param _asset 		ERC20 token to deposit and lend. Must verify asset is supported by oracle on Lines you want to invest in.
 	@param _name 		custom pool name. first 0-13 chars are templated  "Debt DAO Pool - {_name}"
-	@param _symbol 		custom pool symbol. first 5 chars are templated  "dd{token.symbol}-{_symbol}"
+	@param _symbol 		custom pool symbol. first 3 chars are templated  "ddp{_asset.symbol}-{_symbol}"
 	@param _fees 		fees to charge on pool
 	"""
 	self.owner = msg.sender # set owner to deployer for validation functions
-	assert self._assert_max_fee(_fees.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
-	assert self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
-	assert self._assert_pittance_fee(_fees.flash, FEE_TYPES.FLASH)
-	assert self._assert_pittance_fee(_fees.referral, FEE_TYPES.REFERRAL)
-	assert self._assert_pittance_fee(_fees.deposit, FEE_TYPES.DEPOSIT)
-	assert self._assert_pittance_fee(_fees.withdraw, FEE_TYPES.WITHDRAW)
+	self._assert_max_fee(_fees.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
+	self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
+	self._assert_pittance_fee(_fees.flash, FEE_TYPES.FLASH)
+	self._assert_pittance_fee(_fees.referral, FEE_TYPES.REFERRAL)
+	self._assert_pittance_fee(_fees.deposit, FEE_TYPES.DEPOSIT)
+	self._assert_pittance_fee(_fees.withdraw, FEE_TYPES.WITHDRAW)
 
 	# Setup Pool variables
 	assert _delegate != empty(address)
@@ -204,7 +203,7 @@ def __init__(
 
 	# IERC20 vars
 	name = self._get_pool_name(_name)
-	symbol = self._get_pool_symbol(_symbol)
+	symbol = self._get_pool_symbol(_asset, _symbol)
 
 	# MUST use same decimals as `asset` token. revert if call fails
 	# We do not account for differening token decimals in our math
@@ -706,7 +705,7 @@ def _calc_and_mint_fee(
 	fees: uint256 = self._calc_fee(shares, fee)
 	if(fees != 0):
 		if(to == self.owner):
-			# store delegate fees so we can slash if neccessary
+			# store delegate fees separetly from delegate balance so we can slash if neccessary
 			assert self._mint(self, fees, fees * self._get_share_price())
 			self.accrued_fees += fees
 		else:
@@ -882,7 +881,6 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 		fees_burned: uint256 = 0
 
 		# If available, take performance fee from delegate to offset impairment and protect depositors
-		# TODO currently callable by anyone. Give % of delegates fees to caller for impairing?
 		if self.accrued_fees >= _assets:
 			fees_burned = _assets / init_share_price
 		else:
@@ -890,9 +888,9 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 			fees_burned = self.accrued_fees
 
 		# burn delegate shares at pre-loss prices
-		# TODO if using post-loss price, delegate will lose more fees
+		# TODO use post-loss price? delegate would lose more fees
 		self._burn(self.owner, fees_burned, fees_burned * init_share_price)
-		# reducing supply during impairment meansshare price goes UP
+		# reducing supply during impairment means share price goes UP
 		self.accrued_fees -= fees_burned
 
 		# TODO if changing delegate burn price, use same price for asset_diff
@@ -1003,6 +1001,17 @@ def _get_pool_name(_name: String[34]) -> String[50]:
 
 @pure
 @internal
+def _get_pool_symbol(_asset: address, _symbol: String[9]) -> String[18]:
+	"""
+	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
+	@param _symbol	 	custom symbol input by pool creator
+	@return 			e.g. ddpDAI-LLAMA, ddpWETH-KARPATKEY
+	"""
+	sym: String[5] = slice(IERC20Detailed(_asset).symbol(), 0, 5)
+	return concat("ddp", sym, '-', _symbol)
+
+@pure
+@internal
 def _get_pool_decimals(_token: address) -> uint8:
 	"""
 	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
@@ -1022,15 +1031,6 @@ def _get_pool_decimals(_token: address) -> uint8:
 		return convert(asset_decimals, uint8)
 	else:
 		return 18
-
-@pure
-@internal
-def _get_pool_symbol(_symbol: String[15]) -> String[18]:
-	"""
-	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
-	@param _symbol	 	custom symbol input by pool creator
-	"""
-	return concat("ddp", _symbol)
 
 
 # 	 IERC 3156 Flash Loan functions
@@ -1071,7 +1071,10 @@ def maxFlashLoan(_token: address) -> uint256:
 
 @view
 @internal
-def _getFlashFee(_token: address, _amount: uint256) -> uint256:
+def _get_flash_fee(_token: address, _amount: uint256) -> uint256:
+	"""
+	@notice slight wrapper _calc_fee to account for liquid assets that can be lent
+	"""
 	if self.fees.flash == 0:
 		return 0
 	else:
@@ -1081,7 +1084,7 @@ def _getFlashFee(_token: address, _amount: uint256) -> uint256:
 @external
 def flashFee(_token: address, _amount: uint256) -> uint256:
 	assert _token == asset
-	return self._getFlashFee(_token, _amount)
+	return self._get_flash_fee(_token, _amount)
 
 @external
 @nonreentrant("lock")
@@ -1096,7 +1099,7 @@ def flashLoan(
 	# give them the flashloan
 	self._erc20_safe_transfer(asset, msg.sender, amount)
 
-	fee: uint256 = self._getFlashFee(_token, amount)
+	fee: uint256 = self._get_flash_fee(_token, amount)
 	
 	# ensure they can receive flash loan
 	# TODO says onFlashLoan not on interface

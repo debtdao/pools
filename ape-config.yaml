@@ -2,6 +2,7 @@ name: debt-dao-pools
 
 plugins:
   - name: vyper
+  - name: foundry
   # - name: etherscan
   # - name: alchemy
   # - name: hardhat 
@@ -27,9 +28,9 @@ ethereum:
 #       - contract_type: ChikkinFactory
 #         address: 0
 
-local:
-  default_network: local
-  local:
+foundry:
+  default_network: test
+  test:
       uri: http://localhost:8545 # anvil mainnet fork
 
 # foundry:
