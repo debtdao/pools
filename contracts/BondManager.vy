@@ -19,7 +19,7 @@ bamm_token_debt: public(uint256)       # Amount “owed” by B.Protocol to Chic
 # yTokensHeldByCBM: uint256   # Computed balance of Y-tokens of LUSD-3CRV vault owned by this contract
                             # (to prevent certain attacks where attacker increases the balance and thus the backing ratio)
 
-# Karen ass bitch managing the dope Debt Dominatrix Bondage Babe's
+# Karen ass bitch managing the dope Debt Dominatrix bondage babes
 #                 ,-`'-.
 #                /    , \
 #               (   ((_)))

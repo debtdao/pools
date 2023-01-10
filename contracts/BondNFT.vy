@@ -1,12 +1,12 @@
 # @version ^0.3.7
 
-# TODO make sure u check all logic in contracts inherited by OG BindNFT.sol
+# TODO make sure u check all logic in contracts inherited by OG BondNFT.sol
 # TODO implement ERC721Enumberable. Look at snekmate
 
 
 # """
-# @title 	Debt Dominatrix Bondage Contract
-# @author Kiba Gateaux
+# @title    Debt Dominatrix Bondage Contract
+# @author   Kiba Gateaux
 # @notice 	
 # @dev 	
 #                                   *
@@ -32,7 +32,7 @@
 #                         $$$$$$$$                 $$S$$S$;        
 #                        :$$S$$$$;       d:       :$SS$$S$$        
 #                        $$$S$$$$$\      ""       $$S$$$S$$.       
-#                        $$$S$$$$N \  ._..._.    d$S$$$$S$$$$p._.  
+#                        $$$S$$$$N \  ._..._.    d$S$$$$S$$$$p 
 #                        $$SS$$$MMm.j         .d$S$$$$S;""^^""    
 #                        :SS$$$$MMMMMb.     .d$$S$$$$SS$          
 #                      '-'S$$$$MMMMMMMMMmmmMMSSS$$$$SS$;          
