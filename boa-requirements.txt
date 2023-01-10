@@ -1,3 +1,4 @@
+# track nightly titanboa releases
 git+https://github.com/vyperlang/titanoboa
 hypothesis
 pytest

@@ -1,11 +1,18 @@
 # @version ^0.3.7
 
-# """
-# @title 	Debt DAO Lending Pool
-# @author 	Kiba Gateaux
-# @desc 	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
-# @dev 		All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
-# """
+"""
+@title 	Debt DAO Lending Pool
+@author	Kiba Gateaux
+@notice	Tokenized, liquid 4626 pool allowing depositors to collectively lend to Debt DAO Line of Credit contracts
+@dev	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
+
+
+
+TODO - 
+1. Refactor yearn permit()  so args are exactly 2612 standard
+2. Add permit + permit2 4626 extension and implement functions
+3. 
+"""
 
 # interfaces defined at bottom of file
 implements: IERC20
@@ -1341,7 +1348,6 @@ interface IERC20Detailed:
 	def decimals() -> uint8: view
 
 interface IERC4626:
-
     def deposit(assets: uint256, receiver: address)  -> uint256: nonpayable
     def withdraw(assets: uint256, receiver: address, owner: address) -> uint256: nonpayable
     def mint(shares: uint256, receiver: address) -> uint256: nonpayable
@@ -1380,6 +1386,14 @@ interface IERC4626:
 interface IERC4626R:
     def depositWithReferral(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
     def mintWithReferral(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+
+# 4626 extension for permits
+interface IERC4626P:
+    def depositWithPermit(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
+    def mintWithPermit(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+    def depositWithPermit2(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
+    def mintWithPermit2(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+
 
 # Flashloans
 interface IERC3156:
