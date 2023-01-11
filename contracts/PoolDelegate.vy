@@ -182,6 +182,8 @@ def __init__(
 	@param symbol_ 		custom pool symbol. first 5 chars are templated  "dd{token.symbol}-{symbol_}"
 	@param fees 		fees to charge on pool
 	"""
+	
+	# CONFUSING
 	self.owner = msg.sender # set owner to deployer for validation functions
 	assert delegate_ != empty(address)
 	assert self._assert_max_fee(fees_.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
@@ -274,6 +276,8 @@ def use_and_repay(line: address, repay: uint256, withdraw: uint256) -> (uint256,
 	assert ISecuredLine(line).useAndRepay(repay)
 
 	return self._reduce_credit(line, id, withdraw)
+
+# THIS IS THE BIG ONE - IMPAIRMENT
 
 @external
 @nonreentrant("lock")
@@ -406,6 +410,8 @@ def accept_owner() -> bool:
 	self.owner = self.pending_owner
 	log UpdateOwner(self.pending_owner)
 	return True
+
+# THS IS COOL^
 
 @external
 def update_min_deposit(new_min: uint256)  -> bool:
