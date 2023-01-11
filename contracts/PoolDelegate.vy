@@ -195,6 +195,8 @@ def __init__(
 	@param _symbol 		custom pool symbol. first 9 chars are templated  "ddp{_asset.symbol}-{_symbol}"
 	@param _fees 		fees to charge on pool
 	"""
+	
+	# CONFUSING
 	self.owner = msg.sender # set owner to deployer for validation functions
 	self._assert_max_fee(_fees.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
 	self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
@@ -220,7 +222,7 @@ def __init__(
 	# IERC4626
 	asset = _asset
 
-	# NOTE: Yearn - set profit to bedistributed every 6 hours
+	# NOTE: Yearn - set profit to be distributed every 6 hours
 	# self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
 	# TODO: Debt DAO - set profit to bedistributed to every `1 eek` (ethereum week)
@@ -304,6 +306,8 @@ def use_and_repay(line: address, repay: uint256, withdraw: uint256) -> (uint256,
 	assert ISecuredLine(line).useAndRepay(repay)
 
 	return self._reduce_credit(line, id, withdraw)
+
+# THIS IS THE BIG ONE - IMPAIRMENT
 
 @external
 @nonreentrant("lock")
@@ -463,6 +467,8 @@ def accept_owner() -> bool:
 	self.owner = self.pending_owner
 	log UpdateOwner(self.pending_owner)
 	return True
+
+# THS IS COOL^
 
 @external
 def update_min_deposit(new_min: uint256)  -> bool:
