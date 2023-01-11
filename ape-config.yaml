@@ -34,24 +34,3 @@ foundry:
     uri: http://localhost:8545 # anvil mainnet fork
   test:
       uri: http://localhost:8545 # anvil mainnet fork
-
-# test:
-#   default_network: foundry
-#   test:
-#       uri: http://localhost:8545 # anvil mainnet fork
-
-# foundry:
-#   ethereum:
-# #     mainnet:
-# #       uri: https://eth-mainnet.g.alchemy.com/v2/HZ5Zx8JNumQj-nXdtpJEzTgTT7JvpFWO
-#     local:
-#       uri: http://localhost:8545 # anvil mainnet fork
-#       # uri: http://localhost:9090 # hardhat mainnet fork
-
-# hardhat:
-#   port: auto
-#   fork:
-#     ethereum:
-#       mainnet:
-#         upstream_provider: alchemy
-#         enable_hardhat_deployments: true

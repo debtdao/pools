@@ -14,7 +14,7 @@ import ape
 #     oracle_price=st.integers(min_value=2000 * 10**18, max_value=4000 * 10**18),
 #     n1=st.integers(min_value=1, max_value=50),
 #     dn=st.integers(min_value=0, max_value=49),
-#     deposit_amount=st.integers(min_value=10**12, max_value=10**20),
+#     deposit_amount=st.integers(min_value=10**12, max_value=10**25),
 #     init_trade_frac=st.floats(min_value=0.0, max_value=1.0),
 #     p_frac=st.floats(min_value=0.1, max_value=10)
 # )

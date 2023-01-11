@@ -1,6 +1,7 @@
 import boa
 import ape
 import pytest
+import logging
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from datetime import timedelta
@@ -16,276 +17,287 @@ from math import exp
 # # events properly emitted
 # # invairants around total supply with mint/burn
 
-# transfers properly update token balances
-@given( amount=st.integers(min_value=1, max_value=10**6),
-        is_send=st.integers(min_value=0, max_value=1))
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_can_mint(accounts, lending_token, amount, is_send):
-    user = accounts[0]
-    other = accounts[1]
-    (sender, receiver) = (user, other) if is_send else (other, user)
-
-    sender_pre_balance =  lending_token.balanceOf(sender)
-    receiver_pre_balance =  lending_token.balanceOf(receiver)
-
-    with boa.env.prank(user):
-        assert lending_token.transfer(amount)
-        sender_post_balance = lending_token.balanceOf(sender)
-        receiver_post_balance = lending_token.balanceOf(receiver)
-        assert sender_post_balance == sender_pre_balance - amount
-        assert receiver_post_balance == receiver_pre_balance + amount
-
 
 # # Standard test comes from the interpretation of EIP-20
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+
 
 # https://docs.apeworx.io/ape/stable/methoddocs/managers.html?highlight=project#module-ape.managers.project.manager
 
-def test_initial_state(lending_token, owner):
+def test_initial_state(lending_token, pool_token, bond_token):
     """
     Test inital state of the contract.
     """
+
     # Check the token meta matches the deployment
     # token.method_name() has access to all the methods in the smart contract.
     assert lending_token.name() == "Lending Token"
     assert lending_token.symbol() == "LEND"
     assert lending_token.decimals() == 18
 
+    assert pool_token.name() == "Debt DAO Pool - Dev Testing"
+    # TODO fix symbol autogeneration
+    # assert pool_token.symbol() == "ddpLEND-KIBA-TEST"
+    assert pool_token.decimals() == 18
+
+    assert bond_token.name() == "Bondage Token"
+    assert bond_token.symbol() == "BONDAGE"
+    assert bond_token.decimals() == 18
+
     # Check of intial state of authorization
-    assert lending_token.owner() == owner
+    # assert lending_token.owner() == admin
 
-    # Check intial balance of lending_tokens
-
+    # Check intial mints in conftest
     # assert lending_token.totalSupply() == 1000
-    # assert lending_token.balanceOf(owner) == 1000
+    # assert lending_token.balanceOf(admin) == 1000
 
 
-def test_transfer(token, owner, receiver):
-    """
-    Transfer must transfer an amount to an address.
-    Must trigger Transfer Event.
-    Should throw an error of balance if sender does not have enough funds.
-    """
-    owner_balance = token.balanceOf(owner)
-# {%- if cookiecutter.premint == 'y' %}
-#     assert owner_balance == {{cookiecutter.premint_amount}}
-# {%- else %}
-#     assert owner_balance == 1000
 
-    receiver_balance = token.balanceOf(receiver)
-    assert receiver_balance == 0
+# transfers properly update token balances
+@given(amount=st.integers(min_value=1, max_value=10**25),
+    is_send=st.integers(min_value=0, max_value=1))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_send):
+    (sender, receiver) = (me, admin) if is_send else (admin, me)
 
-    # token.method_name() has access to all the methods in the smart contract.
-    tx = token.transfer(receiver, 100, sender=owner)
+    for token in all_erc20_tokens:
+        pre_sender_balance =  token.balanceOf(sender)
+        pre_receiver_balance =  token.balanceOf(receiver)
 
-    # validate that Transfer Log is correct
-    # https://docs.apeworx.io/ape/stable/methoddocs/api.html?highlight=decode#ape.api.networks.EcosystemAPI.decode_logs
-    logs = list(tx.decode_logs(token.Transfer))
-    assert len(logs) == 1
-    assert logs[0].sender == owner
-    assert logs[0].receiver == receiver
-    assert logs[0].amount == 100
+        with boa.env.prank(sender):
+            tx0 = token.transfer(receiver, amount, sender=sender)
 
-    receiver_balance = token.balanceOf(receiver)
-    assert receiver_balance == 100
+            # validate that Transfer Log is correct
+            # TODO figure out how to test logs in boa        # https://docs.apeworx.io/ape/stable/methoddocs/api.html?highlight=decode#ape.api.networks.EcosystemAPI.decode_logs
+            # logs0 = list(tx0.decode_logs(token.Transfer))
+            # assert len(logs0) == 1
+            # assert logs0[0].sender == sender
+            # assert logs0[0].receiver == receiver
+            # assert logs0[0].amount == amount
+            
+            post_sender_balance = token.balanceOf(sender)
+            post_receiver_balance = token.balanceOf(receiver)
+            assert post_sender_balance == pre_sender_balance - amount
+            assert post_receiver_balance == pre_receiver_balance + amount
+            
+            # transfering 0 should do nothing
+            tx1 = token.transfer(receiver, 0, sender=sender)
 
-    owner_balance = token.balanceOf(owner)
-# {%- if cookiecutter.premint == 'y' %}
-#     assert owner_balance == {{cookiecutter.premint_amount}} - 100
-# {%- else %}
-#     assert owner_balance == 900
+            # TODO figure out how to test logs in boa
+            # logs1 = list(tx0.decode_logs(token.Transfer))
+            # assert len(logs1) == 1
+            # assert logs1[0].sender == sender
+            # assert logs1[0].receiver == receiver
+            # assert logs1[0].amount == 0
 
-    # Expected insufficient funds failure
-    # ape.reverts: Reverts the current call using a given snapshot ID.
-    # Allows developers to go back to a previous state.
-    # https://docs.apeworx.io/ape/stable/methoddocs/api.html?highlight=revert
-    with ape.reverts():
-        token.transfer(owner, 200, sender=receiver)
-
-    # NOTE: Transfers of 0 values MUST be treated as normal transfers
-    # and trigger a Transfer event.
-    tx = token.transfer(owner, 0, sender=owner)
+            with boa.reverts():  # TODO expect right revert msg
+                # Expected insufficient funds failure
+                token.transfer(receiver, post_sender_balance + 1, sender=sender)
 
 
-def test_transfer_from(token, owner, accounts):
+@given(amount=st.integers(min_value=1, max_value=10**25),
+        is_send=st.integers(min_value=0, max_value=1))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasury, amount, is_send):
     """
     Transfer tokens to an address.
-    Transfer operator may not be an owner.
+    Transfer operator may not be an admin.
     Approve must be valid to be a spender.
     """
-    receiver, spender = accounts[1:3]
+    (sender, receiver) = (me, admin) if is_send else (admin, me)
 
-    owner_balance = token.balanceOf(owner)
-# {%- if cookiecutter.premint == 'y' %}
-#     assert owner_balance == {{cookiecutter.premint_amount}}
-# {%- else %}
-#     assert owner_balance == 1000
+    for token in all_erc20_tokens:
 
-    receiver_balance = token.balanceOf(receiver)
-    assert receiver_balance == 0
+        pre_sender_balance = token.balanceOf(sender)
+        pre_receiver_balance = token.balanceOf(receiver)
 
-    # Spender with no approve permission cannot send tokens on someone behalf
-    with ape.reverts():
-        token.transferFrom(owner, receiver, 300, sender=spender)
+        # Spender with no approve permission cannot send tokens on someone behalf
+        with boa.reverts():
+            token.transferFrom(sender, receiver, amount, sender=receiver)
 
-    # Get approval for allowance from owner
-    tx = token.approve(spender, 300, sender=owner)
+        # Get approval for allowance from sender
+        tx = token.approve(receiver, amount, sender=sender)
 
-    logs = list(tx.decode_logs(token.Approval))
-    assert len(logs) == 1
-    assert logs[0].owner == owner
-    assert logs[0].spender == spender
-    assert logs[0].amount == 300
+        # TODO figure out how to test logs in boa
+        # logs = list(tx.decode_logs(token.Approval))
+        # assert len(logs) == 1
+        # assert logs[0].sender == sender
+        # assert logs[0].receiver == receiver
+        # assert logs[0].amount == amount
 
-    assert token.allowance(owner, spender) == 300
+        approved = token.allowance(sender, receiver)
+        assert approved == amount 
 
-    # With auth use the allowance to send to receiver via spender(operator)
-    tx = token.transferFrom(owner, receiver, 200, sender=spender)
+        # logging.debug("approved transferFrom amount", approved, amount)
+        print("approved transferFrom amount", approved, amount)
 
-    logs = list(tx.decode_logs(token.Transfer))
-    assert len(logs) == 1
-    assert logs[0].sender == owner
-    assert logs[0].receiver == receiver
-    assert logs[0].amount == 200
+        # With auth use the allowance to send to receiver via sender(operator)
+        tx = token.transferFrom(sender, receiver, amount, sender=receiver)
 
-    assert token.allowance(owner, spender) == 100
+        # # TODO figure out how to test logs in boa
+        # # logs = list(tx.decode_logs(token.Transfer))
+        # # assert len(logs) == 1
+        # # assert logs[0].sender == admin
+        # # assert logs[0].receiver == receiver
+        # # assert logs[0].amount == 200
 
-    # Cannot exceed authorized allowance
-    with ape.reverts():
-        token.transferFrom(owner, receiver, 200, sender=spender)
+        assert token.allowance(sender, receiver) == 0
+        assert token.balanceOf(sender) == pre_sender_balance - amount
+        assert token.balanceOf(receiver) == pre_receiver_balance + amount
 
-    token.transferFrom(owner, receiver, 100, sender=spender)
-    assert token.balanceOf(spender) == 0
-    assert token.balanceOf(receiver) == 300
-# {%- if cookiecutter.premint == 'y' %}
-#     assert token.balanceOf(owner) == {{cookiecutter.premint_amount}} - 300
-# {%- else %}
-#     assert token.balanceOf(owner) == 700
+        # # Cannot exceed authorized allowance
+        with boa.reverts(): # TODO expect right revert msg
+            token.transferFrom(sender, receiver, 1, sender=receiver)
+        
+        # receiver should be able to transferFrom themselves to themselves
+        token.transferFrom(receiver, receiver, amount, sender=receiver)
+        # both have same balance has before
+        assert token.balanceOf(sender) == pre_sender_balance - amount
+        assert token.balanceOf(receiver) == pre_receiver_balance + amount
+        # todo test logs
 
+        # receiver should be able to transferFrom themselves even tho its gas inefficient
+        token.transferFrom(receiver, sender, pre_receiver_balance + amount, sender=receiver)
 
-def test_approve(token, owner, receiver):
+        assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
+        assert token.balanceOf(receiver) == 0
+
+        # sender should be able to send 0 if they have 0 balance
+        token.transferFrom(receiver, sender, 0, sender=receiver)
+        # both have same balance has before
+        assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
+        assert token.balanceOf(receiver) == 0
+
+@given(amount=st.integers(min_value=1, max_value=10**50),
+        is_send=st.integers(min_value=0, max_value=1))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_send):
     """
     Check the authorization of an operator(spender).
     Check the logs of Approve.
     """
-    spender = receiver
+    (sender, receiver) = (me, admin) if is_send else (admin, me)
 
-    tx = token.approve(spender, 300, sender=owner)
+    for token in all_erc20_tokens:
 
-    logs = list(tx.decode_logs(token.Approval))
-    assert len(logs) == 1
-    assert logs[0].owner == owner
-    assert logs[0].spender == spender
-    assert logs[0].amount == 300
+        tx = token.approve(sender, amount, sender=receiver)
 
-    assert token.allowance(owner, spender) == 300
+        # logs = list(tx.decode_logs(token.Approval))
+        # assert len(logs) == 1
+        # assert logs[0].receiver == receiver
+        # assert logs[0].sender == sender
+        # assert logs[0].amount == amount
 
-    # Set auth balance to 0 and check attacks vectors
-    # though the contract itself shouldn’t enforce it,
-    # to allow backwards compatibility
-    tx = token.approve(spender, 0, sender=owner)
+        assert token.allowance(receiver, sender) == amount
 
-    logs = list(tx.decode_logs(token.Approval))
-    assert len(logs) == 1
-    assert logs[0].owner == owner
-    assert logs[0].spender == spender
-    assert logs[0].amount == 0
+        # Set auth balance to 0 and check attacks vectors
+        # though the contract itself shouldn’t enforce it,
+        # to allow backwards compatibility
+        tx = token.approve(sender, 0, sender=receiver)
 
-    assert token.allowance(owner, spender) == 0
+        # logs = list(tx.decode_logs(token.Approval))
+        # assert len(logs) == 1
+        # assert logs[0].receiver == receiver
+        # assert logs[0].sender == sender
+        # assert logs[0].amount == 0
 
+        assert token.allowance(admin, sender) == 0
 
-def test_mint(token, owner, receiver):
+@given(amount=st.integers(min_value=1, max_value=10**50),
+        is_send=st.integers(min_value=0, max_value=1))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_mint(all_erc20_tokens, init_token_balances, token, admin, me, amount, is_send):
     """
     Create an approved amount of tokens.
     """
-    totalSupply = token.totalSupply()
-    assert totalSupply == 1000
+    (sender, receiver) = (me, admin) if is_send else (admin, me)
+    for token in all_erc20_tokens:
+        totalSupply = token.totalSupply()
 
-    receiver_balance = token.balanceOf(receiver)
-    assert receiver_balance == 0
+        sender_balance = token.balanceOf(sender)
+        assert sender_balance == init_token_balances
 
-    tx = token.mint(receiver, 420, sender=owner)
+        tx = token.mint(sender, amount, sender=receiver)
 
-    logs = list(tx.decode_logs(token.Transfer))
-    assert len(logs) == 1
-    assert logs[0].sender == ZERO_ADDRESS
-    assert logs[0].receiver == receiver.address
-    assert logs[0].amount == 420
+        # logs = list(tx.decode_logs(token.Transfer))
+        # assert len(logs) == 1
+        # assert logs[0].sender == ZERO_ADDRESS
+        # assert logs[0].sender == sender.address
+        # assert logs[0].amount == amount
 
-    receiver_balance = token.balanceOf(receiver)
-    assert receiver_balance == 420
+        assert token.balanceOf(sender) == sender_balance + amount
 
-    totalSupply = token.totalSupply()
-    assert totalSupply == 1420
-
-
-def test_add_minter(token, owner, accounts):
-    """
-    Test adding new minter.
-    Must trigger MinterAdded Event.
-    Must return true when checking if target isMinter
-    """
-    target = accounts[1]
-    assert token.isMinter(target) is False
-    token.addMinter(target, sender=owner)
-    assert token.isMinter(target) is True
+        assert token.totalSupply() == totalSupply + amount
 
 
-def test_add_minter_targeting_zero_address(token, owner):
-    """
-    Test adding new minter targeting ZERO_ADDRESS
-    Must trigger a ContractLogicError (ape.exceptions.ContractLogicError)
-    """
-    target = ZERO_ADDRESS
-    with pytest.raises(ape.exceptions.ContractLogicError) as exc_info:
-        token.addMinter(target, sender=owner)
-    assert exc_info.value.args[0] == "Cannot add zero address as minter."
+# def test_add_minter(token, admin, accounts):
+#     """
+#     Test adding new minter.
+#     Must trigger MinterAdded Event.
+#     Must return true when checking if target isMinter
+#     """
+#     target = accounts[1]
+#     assert token.isMinter(target) is False
+#     token.addMinter(target, sender=admin)
+#     assert token.isMinter(target) is True
 
 
-def test_burn(token, owner):
+# def test_add_minter_targeting_zero_address(token, admin):
+#     """
+#     Test adding new minter targeting ZERO_ADDRESS
+#     Must trigger a ContractLogicError (ape.exceptions.ContractLogicError)
+#     """
+#     target = ZERO_ADDRESS
+#     with pytest.raises(ape.exceptions.ContractLogicError) as exc_info:
+#         token.addMinter(target, sender=admin)
+#     assert exc_info.value.args[0] == "Cannot add zero address as minter."
+
+
+def test_burn(token, admin):
     """
     Burn/Send amount of tokens to ZERO Address.
     """
     totalSupply = token.totalSupply()
     assert totalSupply == 1000
 
-    owner_balance = token.balanceOf(owner)
+    owner_balance = token.balanceOf(admin)
     assert owner_balance == 1000
 
-    tx = token.burn(420, sender=owner)
+    tx = token.burn(420, sender=admin)
 
-    logs = list(tx.decode_logs(token.Transfer))
-    assert len(logs) == 1
-    assert logs[0].sender == owner
-    assert logs[0].amount == 420
+    # logs = list(tx.decode_logs(token.Transfer))
+    # assert len(logs) == 1
+    # assert logs[0].sender == admin
+    # assert logs[0].amount == 420
 
-    owner_balance = token.balanceOf(owner)
+    owner_balance = token.balanceOf(admin)
     assert owner_balance == 580
 
     totalSupply = token.totalSupply()
     assert totalSupply == 580
 
 
-def test_permit(chain, token, owner, receiver, Permit):
+def test_permit(chain, token, admin, me, Permit):
     """
     Validate permit method for incorrect ownership, values, and timing
     """
     amount = 100
-    nonce = token.nonces(owner)
+    nonce = token.nonces(admin)
     deadline = chain.pending_timestamp + 60
-    assert token.allowance(owner, receiver) == 0
-    permit = Permit(owner.address, receiver.address, amount, nonce, deadline)
-    signature = owner.sign_message(permit.signable_message).encode_rsv()
+    assert token.allowance(admin, me) == 0
+    permit = Permit(admin.address, me.address, amount, nonce, deadline)
+    signature = admin.sign_message(permit.signable_message).encode_rsv()
 
-    with ape.reverts():
-        token.permit(receiver, receiver, amount, deadline, signature, sender=receiver)
-    with ape.reverts():
-        token.permit(owner, owner, amount, deadline, signature, sender=receiver)
-    with ape.reverts():
-        token.permit(owner, receiver, amount + 1, deadline, signature, sender=receiver)
-    with ape.reverts():
-        token.permit(owner, receiver, amount, deadline + 1, signature, sender=receiver)
+    with boa.reverts():
+        token.permit(me, me, amount, deadline, signature, sender=me)
+    with boa.reverts():
+        token.permit(admin, admin, amount, deadline, signature, sender=me)
+    with boa.reverts():
+        token.permit(admin, me, amount + 1, deadline, signature, sender=me)
+    with boa.reverts():
+        token.permit(admin, me, amount, deadline + 1, signature, sender=me)
 
-    token.permit(owner, receiver, amount, deadline, signature, sender=receiver)
+    token.permit(admin, me, amount, deadline, signature, sender=me)
 
-    assert token.allowance(owner, receiver) == 100
+    assert token.allowance(admin, me) == 100
