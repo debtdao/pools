@@ -29,14 +29,16 @@ ethereum:
 #         address: 0
 
 foundry:
-  default_network: test
+  # default_network: test
+  local:
+    uri: http://localhost:8545 # anvil mainnet fork
   test:
       uri: http://localhost:8545 # anvil mainnet fork
 
-test:
-  default_network: foundry
-  test:
-      uri: http://localhost:8545 # anvil mainnet fork
+# test:
+#   default_network: foundry
+#   test:
+#       uri: http://localhost:8545 # anvil mainnet fork
 
 # foundry:
 #   ethereum:

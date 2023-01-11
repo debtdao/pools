@@ -3,11 +3,10 @@ build/
 .build/
 reports/
 .history
+venv/
 
 .env
 .hypothesis/
-
-# venv
 
 bin/
 pyvenv.cfg

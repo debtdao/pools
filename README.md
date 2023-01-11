@@ -3,5 +3,12 @@ TODO:
 - https://curve.readthedocs.io/guide-code-style.html
 
 
+## installation
+
+```bash
+ pip install -r ape-requirements.txt   
+ pip install -r boa-requirements.txt   
+ape plugins install .
+```
 ## Testing
 `ape test --network=ethereum:local:foundry --trace --cache-clear --gas -v DEBUG`
