@@ -220,7 +220,7 @@ def __init__(
 	# IERC4626
 	asset = _asset
 
-	# NOTE: Yearn - set profit to bedistributed every 6 hours
+	# NOTE: Yearn - set profit to be distributed every 6 hours
 	# self.locked_profit_degradation = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
 	# NOTE: Debt DAO - set profit to bedistributed every 7 days
