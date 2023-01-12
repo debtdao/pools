@@ -1,9 +1,17 @@
-# import boa
-# import pytest
+import boa
+import pytest
 
 # boa.interpret.set_cache_dir()
 # boa.reset_env()
 
+@pytest.fixture(scope="session")
+def borrower():
+    return boa.env.generate_address()
+
+# @pytest.fixture(scope="session")
+# def line(pool_token, admin, borrower):
+        # TODO make mock line contract for investing/impairment
+#     return boa.load('contracts/MockLine.vy', borrower, admin)
 
 # @pytest.fixture(scope="session")
 # def pool(admin, asset_token):
