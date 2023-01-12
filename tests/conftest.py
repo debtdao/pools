@@ -10,10 +10,7 @@ boa.reset_env()
 PRICE = 3000
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 
-@pytest.fixture(scope="module")
-def accounts():
-    return [boa.env.generate_address() for i in range(10)]
-
+# dummy addresses. not active signers like Ape.accounts
 @pytest.fixture(scope="module")
 def me():
     return boa.env.generate_address()
@@ -78,21 +75,21 @@ def init_token_balances(lending_token, bond_token, pool_token, admin, me):
 
     return mint_amount
 
-@pytest.fixture(scope="module")
-def Permit(chain, token):
-    class Permit(EIP712Message):
-        _name_  = "Lending Token" #: "string"
-        _version_  ="1.0" #: "string"
-        _chainId_  = chain.chain_id #: "uint256"
-        _verifyingContract_  = token.address #: "address"
+# @pytest.fixture(scope="module")
+# def Permit(chain, token):
+#     class Permit(EIP712Message):
+#         _name_  = "Lending Token" #: "string"
+#         _version_  ="1.0" #: "string"
+#         _chainId_  = chain.chain_id #: "uint256"
+#         _verifyingContract_  = token.address #: "address"
 
-        # owner  : "address"
-        # spender  : "address"
-        # value  : "uint256"
-        # nonce  : "uint256"
-        # deadline  : "uint256"
+#         # owner  : "address"
+#         # spender  : "address"
+#         # value  : "uint256"
+#         # nonce  : "uint256"
+#         # deadline  : "uint256"
 
-    return Permit
+#     return Permit
 
 # @pytest.fixture(scope="module")
 # def collateral_token(admin):

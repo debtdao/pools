@@ -80,9 +80,9 @@ SNITCH_FEE: constant(uint16) = 3000
 # @notice 5% in bps. Max fee that can be charged for non-performance fee
 MAX_PITTANCE_FEE: constant(uint16) = 200
 # @notice EIP712 contract name
-CONTRACT_NAME: constant(String[13]) = "Debt DAO Pool"
+_CONTRACT_NAME: constant(String[13]) = "Debt DAO Pool"
 # @notice EIP712 contract version
-API_VERSION: constant(String[7]) = "0.0.001"
+_API_VERSION: constant(String[7]) = "0.0.001"
 # @notice EIP712 type hash
 DOMAIN_TYPE_HASH: constant(bytes32) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 # @notice EIP712 permit type hash
@@ -1076,7 +1076,7 @@ def _get_max_liquid_assets() -> uint256:
 @pure
 @internal
 def _get_pool_name(_name: String[34]) -> String[50]:
-	return concat(CONTRACT_NAME, ' - ', _name)
+	return concat(_CONTRACT_NAME, ' - ', _name)
 
 @pure
 @internal
@@ -1214,7 +1214,7 @@ def flashLoan(
 
 @pure
 @external
-def apiVersion() -> String[28]:
+def v() -> String[18]:
 	"""
 	@notice
 		Used to track the deployed version of this contract. In practice you
@@ -1222,10 +1222,15 @@ def apiVersion() -> String[28]:
 		determine which version of the source matches this deployed contract.
 	@dev
 		All strategies must have an `apiVersion()` that matches the Vault's
-		`API_VERSION`.
-	@return API_VERSION which holds the current version of this contract.
+		`_API_VERSION`.
+	@return _API_VERSION which holds the current version of this contract.
 	"""
-	return API_VERSION
+	return _API_VERSION
+
+@view
+@external
+def n() -> String[18]:
+    return _CONTRACT_NAME
 
 @view
 @internal
@@ -1233,8 +1238,8 @@ def domain_separator() -> bytes32:
 	return keccak256(
 		concat(
 			DOMAIN_TYPE_HASH,
-			keccak256(convert(CONTRACT_NAME, Bytes[13])),
-			keccak256(convert(API_VERSION, Bytes[7])),
+			keccak256(convert(_CONTRACT_NAME, Bytes[13])),
+			keccak256(convert(_API_VERSION, Bytes[7])),
 			convert(chain.id, bytes32),
 			convert(self, bytes32)
 		)
