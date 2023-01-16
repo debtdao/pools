@@ -11,4 +11,10 @@ TODO:
 ape plugins install .
 ```
 ## Testing
-`ape test --network=ethereum:local:foundry --trace --cache-clear --gas -v DEBUG`
+`ape test --network=::foundry --cache-clear -v DEBUG`
+
+# Docs
+install Mermaid CLI
+`https://github.com/mermaid-js/mermaid-cli`
+
+`mmdc -i ./docs/ChikkinPonziSystem.mmd -o ./docs/ChikkinPonziSystem.svg -t dark -b transparent && open ./docs/ChikkinPonziSystem.png `

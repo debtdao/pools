@@ -8,10 +8,13 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 from datetime import timedelta
 
 
+# TODO Ask ChatGPT to generate test cases in vyper
 
-# TODO for debt dao
+# line of credit integration tests
+# owner priviliges
+# fee updates/settings
 
-@settings(max_examples=500, deadline=timedelta(seconds=1000))
-def test_owner_fees_burned_on_impairment(pool_token, me, admin):
-    with boa.prank(me):
+# @settings(max_examples=500, deadline=timedelta(seconds=1000))
+# def test_owner_fees_burned_on_impairment(pool_token, me, admin):
+    # with boa.prank(me):
         # pool_token

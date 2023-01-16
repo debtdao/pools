@@ -255,6 +255,8 @@ def _deploy_crv_pools(base_token: address, ddp_token: address, bddp_token: addre
         # no metapool. create pool with just ddp and bddptokens
         _name: String[32] = "" # TODO
         _symbol: String[10] = "" # TODO
+
+        #todo asset + ddp + bddp in pool
         crv_pool: address = CurveFactory(CRV_POOL_FACTORY).deploy_metapool(meta_pool, _name, _symbol, ddp_token, DEFAULT_CRV_A, DEFAULT_CRV_FEE)
 
         log DeployPoolCrvAMMs(crv_pool, empty(address))

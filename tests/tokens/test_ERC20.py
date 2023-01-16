@@ -8,6 +8,8 @@ from datetime import timedelta
 from math import exp
 from eip712.messages import EIP712Message
 
+# TODO Ask ChatGPT to generate test cases in vyper
+
 # # test basic ERC20 functionality 
 # # Files that use these tests: PoolDelegate.vy, BondToken.vy, MockERC20.vy
 

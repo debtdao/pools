@@ -12,3 +12,5 @@ bin/
 pyvenv.cfg
 share/
 lib/
+
+docs/*.svg
