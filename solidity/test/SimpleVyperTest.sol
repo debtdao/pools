@@ -6,7 +6,9 @@ import "forge-std/Test.sol";
 import {VyperDeployer} from "../../lib/utils/VyperDeployer.sol";
 
 interface IBondToken {
-    function mint(address _target, uint256 _value) external returns (bool);
+    function _mint_for_testing(address _target, uint256 _value)
+        external
+        returns (bool);
 
     function balanceOf(address _owner) external view returns (uint256);
 
@@ -26,9 +28,8 @@ contract SimpleVyperTest is Test {
         ///@notice deploy a new instance of ISimplestore by passing in the address of the deployed Vyper contract
         iToken = IBondToken(
             vyperDeployer.deployContract(
-                "BondToken",
+                "tests/mocks/MockERC20",
                 abi.encode(
-                    debtdao, // manager
                     "Vyper Token", // name
                     "VTK", // symbol
                     18 //decimals
@@ -45,7 +46,7 @@ contract SimpleVyperTest is Test {
         console.log(name);
         emit log_string(name);
         vm.startPrank(debtdao);
-        iToken.mint(recipient, 100 ether);
+        iToken._mint_for_testing(recipient, 100 ether);
         assertEq(iToken.balanceOf(recipient), 100 ether);
     }
 }
