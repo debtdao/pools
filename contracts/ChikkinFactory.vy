@@ -13,7 +13,7 @@
 TODO
 1. Add yearn vault registry to auto deploy compounding vaults
 2. allow chikkin bond manager to update its yearn strategy only from this factory
-3. 
+3. Make this an ERC1155 that manages ALL bTokens and bNFTs ? ? (might as well make pool owner an NFT then too)
 """
 
 interface Oracle:

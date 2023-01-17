@@ -29,7 +29,7 @@ implements: IERC3156
 implements: IERC4626
 implements: IERC4626R
 implements: IDebtDAOPool
-implements: IFeeGenerator
+implements: IRevenueGenerator
 
 
 # this contracts interface for reference
@@ -129,9 +129,9 @@ owner: public(address)
 # address to migrate delegate powers to. Must be accepted before transfer occurs
 pending_owner: public(address)
 # address that can claim pool delegates fees
-fee_recipient: public(address)
+rev_recipient: public(address)
 # address to migrate revenuestream to. Must be accepted before transfer occurs
-pending_fee_recipient: public(address)
+pending_rev_recipient: public(address)
 # shares earned by Delegate for managing pool
 accrued_fees: public(uint256)
 # minimum amount of assets that can be deposited at once. whales only, fuck plebs.
@@ -208,7 +208,7 @@ def __init__(
 	# Setup Pool variables
 	self.fees = _fees
 	self.owner = _delegate
-	self.fee_recipient = _delegate
+	self.rev_recipient = _delegate
 	self.max_assets = max_value(uint256)
 
 	# IERC20 vars
@@ -275,7 +275,7 @@ def collect_interest(line: address, id: bytes32) -> uint256:
 	@notice
 		Anyone can claim interest from active lines and start vesting profits into pool shares
 	@return
-		Amount of assets earned in usury
+		Amount of assets earned in Debt DAO Line of Credit contract
 	"""
 	return self._reduce_credit(line, id, 0)[1]
 
@@ -493,27 +493,35 @@ def set_withdraw_fee(fee: uint16) -> bool:
 	return self._assert_pittance_fee(fee, FEE_TYPES.WITHDRAW)
 
 @external
-def set_fee_recipient(new_recipient: address) -> bool:
-  assert msg.sender == self.fee_recipient
-  self.pending_fee_recipient = new_recipient
+def set_rev_recipient(new_recipient: address) -> bool:
+  assert msg.sender == self.rev_recipient
+  self.pending_rev_recipient = new_recipient
   log NewPendingFeeRecipient(new_recipient)
   return True
 
 @external
-def accept_fee_recipient() -> bool:
-  assert msg.sender == self.pending_fee_recipient
-  self.fee_recipient = msg.sender
+def accept_rev_recipient() -> bool:
+  assert msg.sender == self.pending_rev_recipient
+  self.rev_recipient = msg.sender
   log AcceptFeeRecipient(msg.sender)
   return True
 
 @external
 @nonreentrant("lock")
-def claim_fees(_token: address, _amount: uint256) -> bool:
+def claimable_rev(_token: address) -> uint256:
+	if _token != ASSET:
+		return 0
+	else:
+		return self.accrued_fees
+
+@external
+@nonreentrant("lock")
+def claim_rev(_token: address, _amount: uint256) -> bool:
 	"""
 	@param _token - token earned as fees to claim. NOTE: not used because `self` is hardcoded
-	@param _amount - amount of _token fee_recipient wants to claim
+	@param _amount - amount of _token rev_recipient wants to claim
 	"""
-	assert msg.sender == self.fee_recipient
+	assert msg.sender == self.rev_recipient
 	
 	# set amount to claim
 	claimed: uint256 = _amount
@@ -524,7 +532,7 @@ def claim_fees(_token: address, _amount: uint256) -> bool:
 	self.accrued_fees -= claimed
 	self._transfer(self, msg.sender, claimed)
 
-	log FeesClaimed(self.fee_recipient, claimed)
+	log FeesClaimed(self.rev_recipient, claimed)
 	# log price for product analytics
 	price: uint256 = self._get_share_price()
 	log TrackSharePrice(price, price, self._get_share_APR())
@@ -771,7 +779,7 @@ def _calc_and_mint_fee(
 			assert self._mint(to, fees, fees * self._get_share_price())
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
-	log FeesGenerated(payer, self, fees, shares, fee_type, to)
+	log RevenueGenerated(payer, self, fees, shares, fee_type, to)
 		
 	return fees
 
@@ -780,7 +788,7 @@ def _calc_and_mint_fee(
 @pure
 def _calc_fee(shares: uint256, fee: uint16) -> uint256:
 	"""
-	@dev	does NOT emit `log FeesGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
+	@dev	does NOT emit `log RevenueGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
 	"""
 	if fee == 0:
 		return 0
@@ -854,7 +862,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uint256):
 	"""
 	@notice		withdraw deposit and/or interest from an external position
-	@return 	(initial principal withdrawn, usurious interest earned)
+	@return 	(initial principal withdrawn, interest earned)
 	"""
 	withdrawable: uint256 = amount
 	interest: uint256 = 0
@@ -896,7 +904,7 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 	"""
 	@notice takes total profits earned and takes fees for delegate and compounder
 	@dev fees are stored as shares but input/ouput assets
-	@param interest_earned - total amount of assets claimed from usurious activities
+	@param interest_earned - total amount of assets claimed as interest payments from Debt DAO Line of Credit contracts
 	@return total amount of shares taken as fees
 	"""
 	share_price: uint256 = self._get_share_price()
@@ -911,7 +919,7 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 		collector_assets: uint256 = collector_fee * share_price
 		self.total_assets -= collector_assets
 		self._erc20_safe_transfer(ASSET, msg.sender, collector_assets)
-		log FeesGenerated(self, ASSET, collector_assets, interest_earned, FEE_TYPES.COLLECTOR, msg.sender)
+		log RevenueGenerated(self, ASSET, collector_assets, interest_earned, FEE_TYPES.COLLECTOR, msg.sender)
 
 	return performance_fee + collector_fee
 
@@ -969,7 +977,7 @@ def _withdraw(
 	# make them burn extra shares instead of inflating total supply.
 	# use _calc not _mint_and_calc. 
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
-	log FeesGenerated(_receiver, self, withdraw_fee, shares,  FEE_TYPES.WITHDRAW, self) # log potential fees for product analytics
+	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  FEE_TYPES.WITHDRAW, self) # log potential fees for product analytics
 
 	#  remove _assets/shares from pool
 	# NOTE: _transfer in _burn checks callers approval to operate owner's assets
@@ -1228,7 +1236,7 @@ def flashLoan(
 	self._erc20_safe_transfer(ASSET, msg.sender, amount)
 
 	fee: uint256 = self._get_flash_fee(_token, amount)
-	log FeesGenerated(msg.sender, ASSET, fee, amount, FEE_TYPES.FLASH, self)
+	log RevenueGenerated(msg.sender, ASSET, fee, amount, FEE_TYPES.FLASH, self)
 
 	# ensure they can receive flash loan and are ERC3156 compatible
 	assert IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender, _token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan")
@@ -1620,20 +1628,21 @@ interface IERC3156FlashBorrower:
 		data:  Bytes[25000]
 	) -> bytes32: payable
 
-
-interface IFeeGenerator:
-	def owner() -> address: nonpayable
-	def pending_owner() -> address: nonpayable
-	def set_owner(new_owner: address) -> bool: nonpayable
+interface IRevenueGenerator:
+	def owner() -> address: view
+	def pending_owner() -> address: view
+	def set_owner(_new_owner: address) -> bool: nonpayable
 	def accept_owner() -> bool: nonpayable
 
-	def fee_recipient() -> address: nonpayable
-	def pending_fee_recipient() -> address: nonpayable
-	def set_fee_recipient(new_recipient: address) -> bool: nonpayable
-	def accept_fee_recipient() -> bool: nonpayable
+	def rev_recipient() -> address: view
+	def pending_rev_recipient() -> address: view
+	def set_rev_recipient(_new_recipient: address) -> bool: nonpayable
+	def accept_rev_recipient() -> bool: nonpayable
 
-	#  @notice optional. MAY do push payments. if push payments then revert\;
-	def claim_fees(_token: address, _amount: uint256) -> bool: nonpayable
+	# @notice how many tokens can be sent to rev_recipient by caller
+	def claimable_rev(_token: address) -> uint256: view
+	#  @notice optional. MAY do push payments. if push payments then revert.
+	def claim_rev(_token: address, _amount: uint256) -> uint256: nonpayable
 	#  @notice optional. Requires mutualConsent. Must return IFeeGenerator.payInvoice.selector if function is supported.
 	# def accept_invoice(_from: address, _token: address, _amount: uint256, _note: String[2048]) -> uint256: nonpayable
 
@@ -1752,13 +1761,13 @@ event AcceptFeeRecipient:
 	fee_recipient: address # New active management fee
 
 
-event FeesGenerated:
+event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	payer: indexed(address) # where fees are being paid from
 	token: indexed(address) # where fees are being paid from
-	fee: indexed(uint256) # tokens paid in fees, denominated in 
-	amount: uint256 # total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
-	fee_type: FEE_TYPES # uint maps to app specific fee enum
-	receiver: address # who is getting the fees paid
+	revenue: indexed(uint256) # total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
+	amount: uint256			# tokens paid in fees, denominated in 
+	fee_type: FEE_TYPES 		# maps to app specific fee enum or eventually some standard fee code system
+	receiver: address 		# who is getting the fees paid
 
 event FeesClaimed:
 	recipient: indexed(address)
