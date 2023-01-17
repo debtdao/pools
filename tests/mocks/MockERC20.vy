@@ -64,44 +64,6 @@ def increaseAllowance(_spender: address, _amount: uint256) -> bool:
 	return True
 
 
-
-@internal
-def _assert_caller_has_approval(_owner: address, _amount: uint256) -> bool:
-	if msg.sender != _owner:
-		allowance: uint256 = self.allowances[_owner][msg.sender]
-
-		log named_uint(allowance, "allowance")
-		log named_uint(_amount, "amount")
-		log named_addy(msg.sender, "caller")
-		log named_addy(_owner, "_owner")
-
-		# MAX = unlimited approval (saves an SSTORE)
-		if (allowance < max_value(uint256)):
-			allowance = allowance - _amount
-			self.allowances[_owner][msg.sender] = allowance
-			# NOTE: Allows log filters to have a full accounting of allowance changes
-			log Approval(_owner, msg.sender, allowance)
-
-	return True
-
-@internal
-def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
-	assert _receiver != self # dev: cant transfer to self
-
-	if _sender != empty(address):
-        self._assert_caller_has_approval(_sender, _amount)
-        # if not minting, then ensure _sender has balance
-        self.balances[_sender] -= _amount
-
-	if _receiver != empty(address):
-		# if not burning, add to _receiver
-		# on burns shares dissapear but we still have logs to track existence
-		self.balances[_receiver] += _amount
-
-	log Transfer(_sender, _receiver, _amount)
-	return True
-
-
 @external
 def transfer(_to : address, _value : uint256) -> bool:
     return self._transfer(msg.sender, _to, _value)
@@ -121,7 +83,44 @@ def approve(_spender : address, _value : uint256) -> bool:
 
 @external
 def _mint_for_testing(_target: address, _value: uint256) -> bool:
-	return self._transfer(empty(address), _target, _value)
+    self.total_supply += _value
+    return self._transfer(empty(address), _target, _value)
+
+
+@internal
+def _assert_caller_has_approval(_owner: address, _amount: uint256, _caller: address, _allowance: uint256):
+	if msg.sender != _owner:
+		allowance: uint256 = self.allowances[_owner][msg.sender]
+
+		log named_uint(allowance, "allowance")
+		log named_uint(_amount, "amount")
+		log named_addy(msg.sender, "caller")
+		log named_addy(_owner, "_owner")
+
+		# MAX = unlimited approval (saves an SSTORE)
+		if (allowance < max_value(uint256)):
+			allowance = allowance - _amount
+			self.allowances[_owner][msg.sender] = allowance
+			# NOTE: Allows log filters to have a full accounting of allowance changes
+			log Approval(_owner, msg.sender, allowance)
+
+@internal
+def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
+	assert _receiver != self # dev: cant transfer to self
+
+	if _sender != empty(address):
+        self._assert_caller_has_approval(_sender, _amount, msg.sender, self.allowances[_sender][msg.sender])
+        # if not minting, then ensure _sender has balance
+        self.balances[_sender] -= _amount
+
+	if _receiver != empty(address):
+		# if not burning, add to _receiver
+		# on burns shares dissapear but we still have logs to track existence
+		self.balances[_receiver] += _amount
+
+	log Transfer(_sender, _receiver, _amount)
+	return True
+
 
 event named_uint:
 	num: indexed(uint256)

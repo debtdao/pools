@@ -17,6 +17,7 @@ TODO -
 5. understand how DEGREDATION_COEFFICIENT works
 6. implement _get_share_APR()
 7. add more events around share price updates and other internal components
+8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
 """
 
 # interfaces defined at bottom of file
@@ -25,10 +26,10 @@ implements: IERC2612
 implements: IERC3156
 implements: IERC4626
 implements: IERC4626R
-implements: IPoolDelegate
+implements: IDebtDAOPool
 
 # this contracts interface for reference
-interface IPoolDelegate:
+interface IDebtDAOPool:
 	# getters
 	def APR() -> int256: view
 	def price() -> uint256: view
@@ -54,7 +55,7 @@ interface IPoolDelegate:
 	def set_owner(new_owner_: address) -> bool: nonpayable
 	def set_max_assets(new_max: uint256) -> bool: nonpayable
 	def set_min_deposit(new_min: uint256) -> bool: nonpayable
-	def set_profit_degredation(degradation: uint256): nonpayable
+	def set_profit_degredation(vesting_rate: uint256): nonpayable
 
 	# fees
 	def set_fee_recipient(newRecipient: address) -> bool: nonpayable
@@ -68,27 +69,28 @@ interface IPoolDelegate:
 
 
 ### Constants
+### TODO only making public for testing purposes. ideally could remain private but still have easy access from tests
 
 # @notice LineLib.STATUS.INSOLVENT
-INSOLVENT_STATUS: constant(uint256) = 4
+INSOLVENT_STATUS: public(constant(uint256)) = 4
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
-FEE_COEFFICIENT: constant(uint16) = 10000
+FEE_COEFFICIENT: public(constant(uint16)) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
 # IF owner fees exist when snitched on. Pool depositors are *guaranteed* to see a price increase, hence heavy incentive to snitches.
-SNITCH_FEE: constant(uint16) = 3000
+SNITCH_FEE: public(constant(uint16)) = 3000
 # @notice 5% in bps. Max fee that can be charged for non-performance fee
-MAX_PITTANCE_FEE: constant(uint16) = 200
+MAX_PITTANCE_FEE: public(constant(uint16)) = 200
 # @notice EIP712 contract name
-CONTRACT_NAME: constant(String[13]) = "Debt DAO Pool"
+CONTRACT_NAME: public(constant(String[13])) = "Debt DAO Pool"
 # @notice EIP712 contract version
-API_VERSION: constant(String[7]) = "0.0.001"
+API_VERSION: public(constant(String[7])) = "0.0.001"
 # @notice EIP712 type hash
-DOMAIN_TYPE_HASH: constant(bytes32) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
+DOMAIN_TYPE_HASH: public(constant(bytes32)) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 # @notice EIP712 permit type hash
-PERMIT_TYPE_HASH: constant(bytes32) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
+PERMIT_TYPE_HASH: public(constant(bytes32)) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
 # TODO rename DEGRADATION_COEFFICIENT
 # rate per block of profit degradation. DEGRADATION_COEFFICIENT is 100% per block
-DEGRADATION_COEFFICIENT: constant(uint256) = 10 ** 18
+DEGRADATION_COEFFICIENT: public(constant(uint256)) = 10 ** 18
 
 # IERC20 vars
 NAME: public(immutable(String[50]))
@@ -526,25 +528,26 @@ def claim_fees(amount: uint256) -> bool:
 
 @external
 @nonreentrant("lock")
-def set_profit_degredation(degradation: uint256):
+def set_profit_degredation(_vesting_rate: uint256):
     """
     @notice
-        Changes the locked profit degradation.
-    @param degradation The rate of degradation in percent per second scaled to 1e18.
+        Changes the locked profit _vesting_rate.
+    @param _vesting_rate The rate of _vesting_rate in percent per second scaled to 1e18.
     """
     assert msg.sender == self.owner, "not owner"
-    # Since "degradation" is of type uint256 it can never be less than zero
-    assert degradation <= DEGRADATION_COEFFICIENT
-    self.vesting_rate = degradation
-    log UpdateProfitDegredation(degradation) 
+    # Since "_vesting_rate" is of type uint256 it can never be less than zero
+    assert _vesting_rate <= DEGRADATION_COEFFICIENT
+    self.vesting_rate = _vesting_rate
+    log UpdateProfitDegredation(_vesting_rate) 
 
 @external
 @nonreentrant("lock")
 def borrow(_line: address, _id: bytes32, _amount: uint256):
 	"""
-	@notice
-		Changes the locked profit degradation.
-	@param degradation The rate of degradation in percent per second scaled to 1e18.
+	@notice allows pool delegate to borrow and lever up / earn spread
+
+	TODO should we more tightly integrate LoC in? I like having it loosely coupled, makes it kinda automagic
+		 also adds security risk but less than giving full control of ur asset to Delegate
 	"""
 	assert msg.sender == self.owner
 
@@ -666,8 +669,9 @@ def increaseAllowance(_spender: address, _amount: uint256) -> bool:
 # transfer + approve vault shares
 @internal
 def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
+	# TODO cant block transfer to self bc then we cant store fes for delegate
 	# prevent locking funds and yUSD/CREAM style share price attacks
-	assert _receiver != self # dev: cant transfer to self
+	# assert _receiver != self # dev: cant transfer to self
 
 	if _sender != empty(address):
 		self._assert_caller_has_approval(_sender, _amount)

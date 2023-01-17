@@ -2,10 +2,9 @@ import boa
 import ape
 import pytest
 import logging
+from datetime import timedelta
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from datetime import timedelta
-from math import exp
 from eip712.messages import EIP712Message
 
 # TODO Ask ChatGPT to generate test cases in vyper
@@ -19,35 +18,36 @@ from eip712.messages import EIP712Message
 # # TESTS TO DO:
 # # events properly emitted
 
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 
-def test_token_info(lending_token, pool_token, bond_token):
+def test_token_info(base_asset, pool, bond_token):
     """
     Test inital state of the contract.
     """
 
     # Check the token meta matches the deployment
     # token.method_name() has access to all the methods in the smart contract.
-    assert lending_token.name() == "Lending Token"
-    assert lending_token.symbol() == "LEND"
-    assert lending_token.decimals() == 18
+    assert base_asset.name() == "Lending Token"
+    assert base_asset.symbol() == "LEND"
+    assert base_asset.decimals() == 18
 
-    assert pool_token.name() == "Debt DAO Pool - Dev Testing"
+    assert pool.name() == "Debt DAO Pool - Dev Testing"
     # TODO fix symbol autogeneration
-    # assert pool_token.symbol() == "ddpLEND-KIBA-TEST"
-    assert pool_token.decimals() == 18
+    # assert pool.symbol() == "ddpLEND-KIBA-TEST"
+    assert pool.decimals() == 18
+    # assert pool.CACHED_COMAIN_SEPARATOR() == 
+    # assert pool.CACHED_CHAIN_ID() == 18
+
 
     assert bond_token.name() == "Bondage Token"
     assert bond_token.symbol() == "BONDAGE"
     assert bond_token.decimals() == 18
 
     # Check of intial state of authorization
-    # assert lending_token.owner() == admin
+    # assert base_asset.owner() == admin
 
     # Check intial mints in conftest
-    # assert lending_token.totalSupply() == 1000
-    # assert lending_token.balanceOf(admin) == 1000
+    # assert base_asset.totalSupply() == 1000
+    # assert base_asset.balanceOf(admin) == 1000
 
 
 
@@ -69,6 +69,7 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
 
             # validate that Transfer Log is correct
             # TODO figure out how to test logs in boa        # https://docs.apeworx.io/ape/stable/methoddocs/api.html?highlight=decode#ape.api.networks.EcosystemAPI.decode_logs
+            # TODO found out. its contract.get_logs(). i assume 0 is first, -1 is last emitted
             # logs0 = list(tx0.decode_logs(token.Transfer))
             # assert len(logs0) == 1
             # assert logs0[0].sender == sender
@@ -94,7 +95,7 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
                 # Expected insufficient funds failure
                 token.transfer(receiver, post_sender_balance + 1, sender=sender)
 
-
+@pytest.mark.slow # we do a lot of tx in here
 @given(amount=st.integers(min_value=1, max_value=10**25),
         is_send=st.integers(min_value=0, max_value=1))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))

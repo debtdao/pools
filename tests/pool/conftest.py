@@ -9,7 +9,7 @@ def borrower():
     return boa.env.generate_address()
 
 # @pytest.fixture(scope="session")
-# def line(pool_token, admin, borrower):
+# def line(pool, admin, borrower):
         # TODO make mock line contract for investing/impairment
 #     return boa.load('contracts/MockLine.vy', borrower, admin)
 
