@@ -3,7 +3,7 @@
   "paths": {
     "artifacts": "out",
     "build_infos": "out/build-info",
-    "sources": "solidity",
+    "sources": "tests/foundry",
     "tests": "test",
     "scripts": "script",
     "libraries": [
@@ -617,53 +617,10 @@
         }
       }
     },
-    "lib/utils/VyperDeployer.sol": {
-      "lastModificationDate": 1673992237818,
-      "contentHash": "6429218d334a57310f632ce85bfd5a97",
-      "sourceName": "lib/utils/VyperDeployer.sol",
-      "solcConfig": {
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "metadata": {
-            "bytecodeHash": "ipfs",
-            "appendCBOR": true
-          },
-          "outputSelection": {
-            "*": {
-              "": [
-                "ast"
-              ],
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ]
-            }
-          },
-          "evmVersion": "london",
-          "libraries": {}
-        }
-      },
-      "imports": [],
-      "versionRequirement": ">=0.8.13",
-      "artifacts": {
-        "VyperDeployer": {
-          "0.8.16+commit.07a7930e.Darwin.appleclang": "VyperDeployer.sol/VyperDeployer.json"
-        },
-        "_CheatCodes": {
-          "0.8.16+commit.07a7930e.Darwin.appleclang": "VyperDeployer.sol/_CheatCodes.json"
-        }
-      }
-    },
-    "solidity/test/SimpleVyperTest.sol": {
-      "lastModificationDate": 1673992253424,
-      "contentHash": "90fa1ceb68d8ccc55c51eacd7241bbb5",
-      "sourceName": "solidity/test/SimpleVyperTest.sol",
+    "tests/foundry/SimpleVyperTest.sol": {
+      "lastModificationDate": 1673992840173,
+      "contentHash": "fab6d91cfbffac649c3681053d3807cc",
+      "sourceName": "tests/foundry/SimpleVyperTest.sol",
       "solcConfig": {
         "settings": {
           "optimizer": {
@@ -707,7 +664,7 @@
         "lib/forge-std/src/Vm.sol",
         "lib/forge-std/src/console.sol",
         "lib/forge-std/src/console2.sol",
-        "lib/utils/VyperDeployer.sol"
+        "tests/foundry/utils/VyperDeployer.sol"
       ],
       "versionRequirement": ">=0.8.13",
       "artifacts": {
@@ -716,6 +673,49 @@
         },
         "SimpleVyperTest": {
           "0.8.16+commit.07a7930e.Darwin.appleclang": "SimpleVyperTest.sol/SimpleVyperTest.json"
+        }
+      }
+    },
+    "tests/foundry/utils/VyperDeployer.sol": {
+      "lastModificationDate": 1673992237818,
+      "contentHash": "6429218d334a57310f632ce85bfd5a97",
+      "sourceName": "tests/foundry/utils/VyperDeployer.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [],
+      "versionRequirement": ">=0.8.13",
+      "artifacts": {
+        "VyperDeployer": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "VyperDeployer.sol/VyperDeployer.json"
+        },
+        "_CheatCodes": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "VyperDeployer.sol/_CheatCodes.json"
         }
       }
     }

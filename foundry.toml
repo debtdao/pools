@@ -1,5 +1,5 @@
 [profile.default]
-src = 'solidity'
+src = 'tests/foundry'
 out = 'out'
 libs = ['lib']
 ffi = true

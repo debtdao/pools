@@ -3,7 +3,7 @@ pragma solidity >=0.8.13;
 
 import "forge-std/Test.sol";
 
-import {VyperDeployer} from "../../lib/utils/VyperDeployer.sol";
+import {VyperDeployer} from "./utils/VyperDeployer.sol";
 
 interface IBondToken {
     function _mint_for_testing(address _target, uint256 _value)
