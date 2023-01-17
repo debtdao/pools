@@ -208,6 +208,7 @@ def __init__(
 	# Setup Pool variables
 	self.fees = _fees
 	self.owner = _delegate
+	self.allowances[self][_delegate] = max_value(uint256) # allow owner to take fees
 	self.rev_recipient = _delegate
 	self.max_assets = max_value(uint256)
 
@@ -424,9 +425,12 @@ def set_owner(new_owner: address) -> bool:
 
 @external
 def accept_owner() -> bool:
-	assert msg.sender == self.pending_owner
-	self.owner = self.pending_owner
-	log UpdateOwner(self.pending_owner)
+	new_owner: address = self.pending_owner
+	assert msg.sender == new_owner
+	self.allowances[self][self.owner] = 0 # disallow old owner to claim fees
+	self.owner = new_owner
+	self.allowances[self][new_owner] = max_value(uint256) # allow owner to take fees
+	log UpdateOwner(new_owner)
 	return True
 
 # THS IS COOL^
@@ -496,20 +500,20 @@ def set_withdraw_fee(fee: uint16) -> bool:
 def set_rev_recipient(new_recipient: address) -> bool:
   assert msg.sender == self.rev_recipient
   self.pending_rev_recipient = new_recipient
-  log NewPendingFeeRecipient(new_recipient)
+  log NewPendingRevRecipient(new_recipient)
   return True
 
 @external
 def accept_rev_recipient() -> bool:
   assert msg.sender == self.pending_rev_recipient
   self.rev_recipient = msg.sender
-  log AcceptFeeRecipient(msg.sender)
+  log AcceptRevRecipient(msg.sender)
   return True
 
 @external
 @nonreentrant("lock")
 def claimable_rev(_token: address) -> uint256:
-	if _token != ASSET:
+	if _token != self:
 		return 0
 	else:
 		return self.accrued_fees
@@ -996,7 +1000,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	"""
 	@return diff in APR, diff in owner fees
 	"""
-	init_share_price: uint256 = self._get_share_price()
+	init_share_price: uint256 = self._get_share_price() # ensure fresh price before updating
 
 	if not _impair:
 		# correct current share price and distributed dividends before updating share valuation
@@ -1507,7 +1511,7 @@ def liquid_assets() -> uint256:
 	@return
 		All available assets that can be withdrawn by depositors
 	"""
-	return self.total_assets - self.total_deployed - self._calc_locked_profit()
+	return self._get_max_liquid_assets()
 
 
 
@@ -1642,7 +1646,7 @@ interface IRevenueGenerator:
 	# @notice how many tokens can be sent to rev_recipient by caller
 	def claimable_rev(_token: address) -> uint256: view
 	#  @notice optional. MAY do push payments. if push payments then revert.
-	def claim_rev(_token: address, _amount: uint256) -> uint256: nonpayable
+	def claim_rev(_token: address, _amount: uint256) -> bool: nonpayable
 	#  @notice optional. Requires mutualConsent. Must return IFeeGenerator.payInvoice.selector if function is supported.
 	# def accept_invoice(_from: address, _token: address, _amount: uint256, _note: String[2048]) -> uint256: nonpayable
 
@@ -1754,12 +1758,11 @@ event UpdateFee:
 	fee_bps: indexed(uint16)
 	fee_type: indexed(FEE_TYPES)
 
-event NewPendingFeeRecipient:
-	new_recipient: address # New active management fee
+event NewPendingRevRecipient:
+	new_recipient: address 	# New active management fee
 
-event AcceptFeeRecipient:
-	fee_recipient: address # New active management fee
-
+event AcceptRevRecipient:
+	new_recipient: address 	# New active management fee
 
 event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	payer: indexed(address) # where fees are being paid from

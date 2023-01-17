@@ -4,6 +4,7 @@ interface IRevenueGenerator:
 	def set_owner(_new_owner: address) -> bool: nonpayable
 	def accept_owner() -> bool: nonpayable
 
+	def rev_type() -> uint64: pure
 	def rev_recipient() -> address: view
 	def pending_rev_recipient() -> address: view
 	def set_rev_recipient(_new_recipient: address) -> bool: nonpayable
@@ -24,23 +25,23 @@ event NewPendingOwner:
 event UpdateOwner:
 	owner: indexed(address) # New active governance
 
-event NewPendingFeeRecipient:
+event NewPendingRevRecipient:
 	new_recipient: address 	# New active management fee
 
-event AcceptFeeRecipient:
-	fee_recipient: address 	# New active management fee
+event AcceptRevRecipient:
+	new_recipient: address 	# New active management fee
 
 event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	payer: indexed(address) # where fees are being paid from
 	token: indexed(address) # where fees are being paid from
 	revenue: indexed(uint256) # tokens paid in fees, denominated in 
 	amount: uint256			# total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
-	fee_type: uint256 		# maps to app specific fee enum or eventually some standard fee code system
+	fee_type: uint64 		# maps to app specific fee enum or eventually some standard fee code system
 	receiver: address 		# who is getting the fees paid
 
-event FeesClaimed:
+event RevenueClaimed:
 	recipient: indexed(address)
-	fees: indexed(uint256)
+	amount: indexed(uint256)
 
 event UpdateFee:
 	fee_type: indexed(uint256)
@@ -48,5 +49,5 @@ event UpdateFee:
 
 event InvoicePaid:
 	client: indexed(address)
-	fee_type: indexed(uint256)
+	rev_type: indexed(uint256)
 	note: indexed(String[2048])

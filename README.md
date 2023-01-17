@@ -24,6 +24,7 @@ $ >>>>> import boa
 $ >>>>> boa.interpret.set_cache_dir()
 # allow gas profiling e.g. pool.line_profile().summary()
 $ >>>>> boa.env.enable_gas_profiling()
+# setup contracts
 $ >>>>> admin = boa.env.generate_address()
 $ >>>>> asset = boa.load('tests/mocks/MockERC20.vy', 'An Asset To Lend', 'LEND', 18)
 $ >>>>> pool = boa.load('contracts/DebtDAOPool.vy', admin, asset, 'Dev Testing', 'TEST', [0,0,0,0,0,0])
@@ -33,10 +34,21 @@ $ >>>>> mint_amount = 100
 $ >>>>> asset._mint_for_testing(admin, mint_amount, sender=admin)
 $ >>>>> asset.approve(pool, mint_amount, sender=admin)
 $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
-$ >>>>> pool.line_profile().summary()
 ```
 
-### Boa dev notes
+## Boa dev notes
+### Snippets
+Claim revenue
+```
+# give owner free fees to claim
+$ >>>>> pool.eval('self.accrued_fees = 10')
+ # create shares so owner can claim
+$ >>>>> pool.eval(f'self.balances[self] = 100')
+# claim as owner
+$ >>>>> pool.claim_rev(pool.address, 10, sender=admin)
+$ >>>>> pool.line_profile().summary()
+```
+### Tips
 1. dont overwrite variables in the repl.
 This sequenece of commands will fail because the `asset` you are minting and approving to is different han the `asset` in the Pool contract.
 ```
@@ -48,6 +60,8 @@ $ >>>>> asset.approve(pool, mint_amount, sender=admin)
 $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
 ```
 2. Must redeploy contracts with `boa.load` for code changes to take affect
+
+
 
 ## Testing
 `ape test --network=::foundry --cache-clear -v INFO`
