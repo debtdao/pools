@@ -9,17 +9,18 @@
 
 
 TODO - 
+6. implement _get_share_APR()
+10. Add performance fee to 4626 profits?
+5. understand how DEGREDATION_COEFFICIENT works
+11. add sepearet var from total_assets called total_debt and use that instead. Prevents lvg from fucking up share price. can incorporatedebt into share price if we want
+8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
 1. Refactor yearn permit()  so args are exactly 2612 standard
 2. Add permit + permit2 IERC4626P extension and implement functions
+4. add dev: revert strings to all asserts
 2. add IERC4626RP (referral + permit)
 3. Make sure using appropriate instances of total_assets, total_deployed, liquid_assets, owned_assets, etc. in state updates and price algorithms
-4. add dev: revert strings to all asserts
-5. understand how DEGREDATION_COEFFICIENT works
-6. implement _get_share_APR()
 7. add more events around share price updates and other internal components
-8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
 9. fix/mitigate rounding errors on share price. might need to make initial share price PRICE_DECIMALS
-10. Add performance fee to 4626 profits?
 """
 
 # interfaces defined at bottom of file
@@ -72,6 +73,8 @@ interface IDebtDAOPool:
 
 # @notice LineLib.STATUS.INSOLVENT
 INSOLVENT_STATUS: public(constant(uint256)) = 4
+# @notice LineLib.STATUS.REPAID
+REPAID_STATUS: public(constant(uint256)) = 3
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
 FEE_COEFFICIENT: public(constant(uint16)) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
@@ -245,13 +248,15 @@ def _assert_delegate_has_available_funds(amount: uint256):
 
 @external
 @nonreentrant("lock")
-def add_credit(line: address, drate: uint128, frate: uint128, amount: uint256) -> bytes32:
-	self._assert_delegate_has_available_funds(amount)
+def add_credit(_line: address, _drate: uint128, _frate: uint128, _amount: uint256) -> bytes32:
+	self._assert_delegate_has_available_funds(_amount)
+	 # prevent delegate confusion btw this add_credit and accept_offer which also call SecuredLine.addCredit()
+	assert ISecuredLine(_line).borrower() != self
 	
-	self.total_deployed += amount
+	self.total_deployed += _amount
 	
 	# NOTE: no need to log, Line emits events already
-	return ISecuredLine(line).addCredit(drate, frate, amount, ASSET, self)
+	return ISecuredLine(_line).addCredit(_drate, _frate, _amount, ASSET, self)
 
 @external
 @nonreentrant("lock")
@@ -557,6 +562,23 @@ def set_profit_degredation(_vesting_rate: uint256):
 	self.vesting_rate = _vesting_rate
 	log UpdateProfitDegredation(_vesting_rate) 
 
+###################################
+###################################
+##### DANGER PONZINOMICS ZONE #####
+###################################
+###################################
+
+
+@external
+@nonreentrant("lock")
+def accept_offer(_line: address, _drate: uint128, _frate: uint128, _amount: uint256) -> bytes32:
+	 # ensure can only call on Lines where we are borrower
+	assert ISecuredLine(_line).borrower() == self
+	
+	# NOTE: no need to log, Line emits events already
+	return ISecuredLine(_line).addCredit(_drate, _frate, _amount, ASSET, self)
+
+
 @external
 @nonreentrant("lock")
 def borrow(_line: address, _id: bytes32, _amount: uint256):
@@ -568,16 +590,53 @@ def borrow(_line: address, _id: bytes32, _amount: uint256):
 	"""
 	assert msg.sender == self.owner
 
-	pre_balance: uint256 = IERC20(ASSET).balanceOf(self) # checkpoint our balance
+	# checkpoint our balance to make sure we receive the money we want
+	pre_balance: uint256 = IERC20(ASSET).balanceOf(self)
 
 	ISecuredLine(_line).borrow(_id, _amount)
 
 	post_balance: uint256 = IERC20(ASSET).balanceOf(self)
+
 	assert pre_balance + _amount == post_balance
 	self.total_assets += _amount
 	# self.debt_owed += _amount
 
 
+@external
+@nonreentrant("lock")
+def repay_debt(_line: address, _amount: uint256):
+	"""
+	@notice allows pool delegate to borrow and lever up / earn spread
+
+	TODO should we more tightly integrate LoC in? I like having it loosely coupled, makes it kinda automagic
+		 also adds security risk but less than giving full control of ur asset to Delegate
+	"""	
+	assert self == ISecuredLine(_line).borrower()
+	assert REPAID_STATUS != ISecuredLine(_line).status()
+	
+	# TODO add conditional on line status. if DEFAUL or INSOLVENT then earn snitch fee
+	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
+	# assert msg.sender == self.owner
+
+	# checkpoint our balance to make sure we only pay what we expected
+	# TODO balance check necessary on repayment if we are borrower and can only borrower asset? Assumes trust in the contract
+	pre_balance: uint256 = IERC20(ASSET).balanceOf(self)
+	
+	IERC20(ASSET).approve(_line, _amount)
+	assert ISecuredLine(_line).depositAndRepay(_amount)
+
+	post_balance: uint256 = IERC20(ASSET).balanceOf(self)
+	
+	assert pre_balance - _amount == post_balance
+	self.total_assets -= _amount
+	# self.debt_owed -= _amount
+
+
+####################################
+####################################
+##### LEAVING PONZINOMICS ZONE #####
+####################################
+####################################
 
 
 ### ERC4626 Functions
@@ -1655,6 +1714,7 @@ interface IRevenueGenerator:
 # Debt DAO interfaces
 
 interface ISecuredLine:
+	def borrower() -> address: pure
 	def ids(index: uint256) -> bytes32: view
 	def status() -> uint256: view
 	def credits(id: bytes32) -> Position: view
@@ -1674,6 +1734,7 @@ interface ISecuredLine:
 
 	# self-repay
 	def useAndRepay(amount: uint256) -> bool: nonpayable
+	def depositAndRepay(amount: uint256) -> bool: nonpayable
 
 	# divest
 	def withdraw(id: bytes32,  amount: uint256) -> bool: nonpayable
