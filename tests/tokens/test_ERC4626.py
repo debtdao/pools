@@ -37,7 +37,7 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 # TODO add fuzzing for deposit fee and share price
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_deposit(pool, base_asset,me, admin, amount, assets, shares, deposit_fee):
+def test_deposit(pool, base_asset, me, admin, amount, assets, shares, deposit_fee):
     """
     Test share price before and after first person enters the pool
     init_token_balances does deposit flow in ../conftest.py
@@ -76,7 +76,9 @@ def test_deposit(pool, base_asset,me, admin, amount, assets, shares, deposit_fee
 
     base_asset.approve(pool, amount, sender=me) 
     shares_created = pool.deposit(amount, me, sender=me) 
-    expected_shares = round(amount / share_price)
+
+    # expected_shares = round(amount / share_price)
+    expected_shares = math.floor(amount / share_price)
     # ensure right price for shares
     # accomodate evm vs python rounding differences
     _assert_uint_with_rounding(shares_created, expected_shares)

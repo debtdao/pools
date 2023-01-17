@@ -18,6 +18,7 @@ TODO -
 6. implement _get_share_APR()
 7. add more events around share price updates and other internal components
 8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
+9. fix/mitigate rounding errors on share price. might need to make initial share price PRICE_DECIMALS
 """
 
 # interfaces defined at bottom of file
