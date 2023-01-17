@@ -70,4 +70,4 @@ $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
 install Mermaid CLI
 `https://github.com/mermaid-js/mermaid-cli`
 
-`mmdc -i ./docs/ChikkinPonziSystem.mmd -o ./docs/ChikkinPonziSystem.svg -t dark -b transparent && open ./docs/ChikkinPonziSystem.png `
+`export $MERMAID_FILE_PATH="./docs/ChikkinPonziSystem"; mmdc -i $MERMAID_FILE_PATH.mmd -o $MERMAID_FILE_PATH.svg -t dark -b transparent && open $MERMAID_FILE_PATH.svg`
