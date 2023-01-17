@@ -31,8 +31,10 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     assert pool.balanceOf(admin) == init_token_balances
     assert pool.balanceOf(me) == init_token_balances
 
+
 @given(amount=st.integers(min_value=0, max_value=10**25),
-        assets=st.integers(min_value=0, max_value=10**25), # total pool assets/shares to manipulate price
+        # total pool assets/shares to manipulate share price
+        assets=st.integers(min_value=0, max_value=10**25),
         shares=st.integers(min_value=0, max_value=10**25),
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 # TODO add fuzzing for deposit fee and share price
@@ -42,8 +44,8 @@ def test_deposit(pool, base_asset, me, admin, amount, assets, shares, deposit_fe
     Test share price before and after first person enters the pool
     init_token_balances does deposit flow in ../conftest.py
     """
-    if me == ZERO_ADDRESS or admin == ZERO_ADDRESS:
-        return
+    # if me == ZERO_ADDRESS or admin == ZERO_ADDRESS:
+    #     return
 
     assert pool.balanceOf(me) == 0
     base_asset._mint_for_testing(me, amount)
@@ -61,17 +63,18 @@ def test_deposit(pool, base_asset, me, admin, amount, assets, shares, deposit_fe
         return # unusable test if no share price
         # TODO What happens in contract if share price == 0 ????
     else:
-        expected_share_price = math.floor(assets / shares) # todo does evm round up or down?
-        # expected_share_price = round(assets / shares) # todo does evm round up or down?
+        # expected_share_price = round(assets / shares)
+        expected_share_price = math.floor(assets / shares)
 
 
     #  manipulate pool shares/assets to get target share price
     pool.eval(f'self.total_assets = {assets}')
     pool.eval(f'self.total_supply = {shares}')
-    share_price = pool.price()
+    share_price = pool.price() # pre deposit price is used in _deposit() for calculating shares returned
     _assert_uint_with_rounding(share_price, expected_share_price)
 
-    fees_generated = round((amount * deposit_fee) / FEE_COEFFICIENT / share_price)
+    # fees_generated = round((amount * deposit_fee) / FEE_COEFFICIENT / share_price)
+    fees_generated = math.floor((amount * deposit_fee) / FEE_COEFFICIENT / share_price) 
     pool.eval(f'self.fees.deposit = {deposit_fee}')
 
     base_asset.approve(pool, amount, sender=me) 

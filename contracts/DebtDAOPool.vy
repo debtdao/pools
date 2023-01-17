@@ -19,6 +19,7 @@ TODO -
 7. add more events around share price updates and other internal components
 8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
 9. fix/mitigate rounding errors on share price. might need to make initial share price PRICE_DECIMALS
+10. Add performance fee to 4626 profits?
 """
 
 # interfaces defined at bottom of file
@@ -28,6 +29,8 @@ implements: IERC3156
 implements: IERC4626
 implements: IERC4626R
 implements: IDebtDAOPool
+implements: IFeeGenerator
+
 
 # this contracts interface for reference
 interface IDebtDAOPool:
@@ -52,21 +55,16 @@ interface IDebtDAOPool:
 	def invest_vault(vault: address, amount: uint256) -> uint256: nonpayable
 
 	# Pool Admin
-	def accept_owner() -> bool: nonpayable
-	def set_owner(new_owner_: address) -> bool: nonpayable
 	def set_max_assets(new_max: uint256) -> bool: nonpayable
 	def set_min_deposit(new_min: uint256) -> bool: nonpayable
 	def set_profit_degredation(vesting_rate: uint256): nonpayable
 
 	# fees
-	def set_fee_recipient(newRecipient: address) -> bool: nonpayable
-	def accept_fee_recipient(newRecipient: address) -> bool: nonpayable
 	def set_performance_fee(fee: uint16) -> bool: nonpayable
 	def set_collector_fee(fee: uint16) -> bool: nonpayable
 	def set_withdraw_fee(fee: uint16) -> bool: nonpayable
 	def set_deposit_fee(fee: uint16) -> bool: nonpayable
 	def set_flash_fee(fee: uint16) -> bool: nonpayable
-	def claim_fees(amount: uint256) -> bool: nonpayable
 
 
 ### Constants
@@ -106,7 +104,7 @@ allowances: HashMap[address, HashMap[address, uint256]]
 
 # IERC4626 vars
 # underlying token for pool/vault
-asset: public(immutable(address))
+ASSET: public(immutable(address))
 # total notional amount of underlying token owned by pool (may not be currently held in pool)
 total_assets: public(uint256)
 
@@ -222,7 +220,7 @@ def __init__(
 	assert DECIMALS != 0, "bad decimals" # 0 could be non-standard `False` or revert
 
 	# IERC4626
-	asset = _asset
+	ASSET = _asset
 
 	# NOTE: Yearn - set profit to be distributed every 6 hours
 	# self.vesting_rate = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
@@ -252,7 +250,7 @@ def add_credit(line: address, drate: uint128, frate: uint128, amount: uint256) -
 	self.total_deployed += amount
 	
 	# NOTE: no need to log, Line emits events already
-	return ISecuredLine(line).addCredit(drate, frate, amount, asset, self)
+	return ISecuredLine(line).addCredit(drate, frate, amount, ASSET, self)
 
 @external
 @nonreentrant("lock")
@@ -376,7 +374,7 @@ def divest_vault(_vault: address, _amount: uint256) -> bool:
 
 	if not is_loss:
 		# if not snitching, then only owner can call bc its part of their investment strategy
-		# otherwise if is_loss anyone can snitch to burn delegate fees and recoup pool loss
+		# otherwise if is_loss anyone can snitch to burn delegate fees and recoup pool losses
 		assert msg.sender == self.owner
 
 	# TODO TEST check that investing, then partially divesting at a loss, then investing more, then divesting more at a profit and/or loss updates our pool share price appropriately
@@ -385,32 +383,34 @@ def divest_vault(_vault: address, _amount: uint256) -> bool:
 
 
 @external
-def sweep(token: address, amount: uint256 = max_value(uint256)):
-    """
-    @notice
-        Removes tokens from this Vault that are not the type of token managed
-        by this Vault. This may be used in case of accidentally sending the
-        wrong kind of token to this Vault.
-        Tokens will be sent to `governance`.
-        This will fail if an attempt is made to sweep the tokens that this
-        Vault manages.
-        This may only be called by governance.
-    @param token The token to transfer out of this vault.
-    @param amount The quantity or tokenId to transfer out.
-    """
-    assert msg.sender == self.owner, "not owner"
-    
-    value: uint256 = amount
-    if token == asset:
+def sweep(_token: address, _amount: uint256 = max_value(uint256)):
+	"""
+	@notice
+		Removes tokens from this Vault that are not the type of token managed
+		by this Vault. This may be used in case of accidentally sending the
+		wrong kind of token to this Vault.
+		Tokens will be sent to `governance`.
+		This will fail if an attempt is made to sweep the tokens that this
+		Vault manages.
+		This may only be called by governance.
+	@param _token The token to transfer out of this vault.
+	@param _amount The quantity or tokenId to transfer out.
+	"""
+	assert msg.sender == self.owner, "not owner"
+
+	value: uint256 = _amount
+	if _token == ASSET:
 		# recover assets sent directly to pool
 		# Can't be used to steal what this Vault is protecting
-        value = IERC20(asset).balanceOf(self) - (self.total_assets - self.total_deployed)
-    elif value == max_value(uint256):
-        value = IERC20(token).balanceOf(self)
+		value = IERC20(ASSET).balanceOf(self) - (self.total_assets - self.total_deployed)
+	elif _token == self:
+		# recover shares sent directly to pool, minus fees held for owner.
+		value = self.balances[self] - self.accrued_fees
+	elif value == max_value(uint256):
+		value = IERC20(_token).balanceOf(self)
 
-
-    log Sweep(token, value)
-    self._erc20_safe_transfer(token, self.owner, value)
+	log Sweep(_token, value)
+	self._erc20_safe_transfer(_token, self.owner, value)
 
 
 ### Pool Admin
@@ -500,7 +500,7 @@ def set_fee_recipient(new_recipient: address) -> bool:
   return True
 
 @external
-def accept_fee_recipient(newRecipient: address) -> bool:
+def accept_fee_recipient() -> bool:
   assert msg.sender == self.pending_fee_recipient
   self.fee_recipient = msg.sender
   log AcceptFeeRecipient(msg.sender)
@@ -508,19 +508,23 @@ def accept_fee_recipient(newRecipient: address) -> bool:
 
 @external
 @nonreentrant("lock")
-def claim_fees(amount: uint256) -> bool:
+def claim_fees(_token: address, _amount: uint256) -> bool:
+	"""
+	@param _token - token earned as fees to claim. NOTE: not used because `self` is hardcoded
+	@param _amount - amount of _token fee_recipient wants to claim
+	"""
 	assert msg.sender == self.fee_recipient
 	
 	# set amount to claim
-	claimed: uint256 = amount
-	if amount == max_value(uint256):
+	claimed: uint256 = _amount
+	if _amount == max_value(uint256):
 		claimed = self.accrued_fees # set to max available
 	
 	# transfer fee shares locked in pool to fee recipient
 	self.accrued_fees -= claimed
 	self._transfer(self, msg.sender, claimed)
 
-	log OwnerFeeClaimed(self.fee_recipient, claimed)
+	log FeesClaimed(self.fee_recipient, claimed)
 	# log price for product analytics
 	price: uint256 = self._get_share_price()
 	log TrackSharePrice(price, price, self._get_share_APR())
@@ -530,16 +534,16 @@ def claim_fees(amount: uint256) -> bool:
 @external
 @nonreentrant("lock")
 def set_profit_degredation(_vesting_rate: uint256):
-    """
-    @notice
-        Changes the locked profit _vesting_rate.
-    @param _vesting_rate The rate of _vesting_rate in percent per second scaled to 1e18.
-    """
-    assert msg.sender == self.owner, "not owner"
-    # Since "_vesting_rate" is of type uint256 it can never be less than zero
-    assert _vesting_rate <= DEGRADATION_COEFFICIENT
-    self.vesting_rate = _vesting_rate
-    log UpdateProfitDegredation(_vesting_rate) 
+	"""
+	@notice
+		Changes the locked profit _vesting_rate.
+	@param _vesting_rate The rate of _vesting_rate in percent per second scaled to 1e18.
+	"""
+	assert msg.sender == self.owner, "not owner"
+	# Since "_vesting_rate" is of type uint256 it can never be less than zero
+	assert _vesting_rate <= DEGRADATION_COEFFICIENT
+	self.vesting_rate = _vesting_rate
+	log UpdateProfitDegredation(_vesting_rate) 
 
 @external
 @nonreentrant("lock")
@@ -552,11 +556,11 @@ def borrow(_line: address, _id: bytes32, _amount: uint256):
 	"""
 	assert msg.sender == self.owner
 
-	pre_balance: uint256 = IERC20(asset).balanceOf(self) # checkpoint our balance
+	pre_balance: uint256 = IERC20(ASSET).balanceOf(self) # checkpoint our balance
 
 	ISecuredLine(_line).borrow(_id, _amount)
 
-	post_balance: uint256 = IERC20(asset).balanceOf(self)
+	post_balance: uint256 = IERC20(ASSET).balanceOf(self)
 	assert pre_balance + _amount == post_balance
 	self.total_assets += _amount
 	# self.debt_owed += _amount
@@ -594,7 +598,7 @@ def depositWithPermit(_assets: uint256, _receiver: address, deadline: uint256, s
 	"""
 		@return - shares
 	"""
-	IERC2612(asset).permit(msg.sender, self, _assets, deadline, signature)
+	IERC2612(ASSET).permit(msg.sender, self, _assets, deadline, signature)
 	return self._deposit(_assets, _receiver)
 
 
@@ -670,7 +674,7 @@ def increaseAllowance(_spender: address, _amount: uint256) -> bool:
 # transfer + approve vault shares
 @internal
 def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
-	# TODO cant block transfer to self bc then we cant store fes for delegate
+	# cant block transfer to self bc then we cant store fes for delegate
 	# prevent locking funds and yUSD/CREAM style share price attacks
 	# assert _receiver != self # dev: cant transfer to self
 
@@ -703,20 +707,20 @@ def _assert_caller_has_approval(_owner: address, _amount: uint256) -> bool:
 
 @internal
 def _erc20_safe_transfer(_token: address, _receiver: address, _amount: uint256):
-    # Used only to send tokens that are not the type managed by this Vault.
-    # HACK: Used to handle non-compliant tokens like USDT
-    response: Bytes[32] = raw_call(
-        _token,
-        concat(
-            method_id("transfer(address,uint256)"),
-            convert(_receiver, bytes32),
-            convert(_amount, bytes32),
-        ),
-        max_outsize=32,
+	# Used only to send tokens that are not the type managed by this Vault.
+	# HACK: Used to handle non-compliant tokens like USDT
+	response: Bytes[32] = raw_call(
+		_token,
+		concat(
+			method_id("transfer(address,uint256)"),
+			convert(_receiver, bytes32),
+			convert(_amount, bytes32),
+		),
+		max_outsize=32,
 		revert_on_failure=True
-    )
-    if len(response) > 0:
-        assert convert(response, bool), "Transfer failed!"
+	)
+	if len(response) > 0:
+		assert convert(response, bool), "Transfer failed!"
 
 
 # 4626 + Pool internal functions
@@ -725,23 +729,23 @@ def _erc20_safe_transfer(_token: address, _receiver: address, _amount: uint256):
 
 
 @internal
-def _mint(to: address, shares: uint256, assets: uint256) -> bool:
+def _mint(_to: address, _shares: uint256, _assets: uint256) -> bool:
 	"""
 	@notice
 		Inc internal supply with new assets deposited and shares minted
 	"""
-	self.total_assets += assets
-	self.total_supply += shares
-	self._transfer(empty(address), to, shares)
+	self.total_assets += _assets
+	self.total_supply += _shares
+	self._transfer(empty(address), _to, _shares)
 	return True
 
 @internal
-def _burn(owner: address, shares: uint256, assets: uint256) -> bool:
+def _burn(owner: address, _shares: uint256, _assets: uint256) -> bool:
 	"""
 	"""
-	self.total_assets -= assets
-	self.total_supply -= shares
-	self._transfer(owner, empty(address), shares)
+	self.total_assets -= _assets
+	self.total_supply -= _shares
+	self._transfer(owner, empty(address), _shares)
 	return True
 
 @internal
@@ -750,7 +754,7 @@ def _calc_and_mint_fee(
 	to: address,
 	shares: uint256,
 	fee: uint16,
-	feeType: FEE_TYPES
+	fee_type: FEE_TYPES
 ) -> uint256:
 	"""
 		@notice - inflate supply, reduce share price, and distribute new shares to ecosystem service provider.
@@ -767,7 +771,7 @@ def _calc_and_mint_fee(
 			assert self._mint(to, fees, fees * self._get_share_price())
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
-	log FeesGenerated(payer, to, fees, shares, feeType)
+	log FeesGenerated(payer, self, fees, shares, fee_type, to)
 		
 	return fees
 
@@ -786,6 +790,13 @@ def _calc_fee(shares: uint256, fee: uint16) -> uint256:
 @internal 
 def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 	"""
+	@notice
+		Anyone can divest entire vault balance as soon as a potential loss appears due to snitch incentive.
+		This automatically protects pool depositors from staying in bad investments in liquid vaults unlike Lines where we can't clawback as easily.
+		On the otherhand Lines give Delegates more control over the investment process + additional incentives via performance fee.
+
+		Good dynamic where Lines have higher yield to fill accrued_fees but lower liquidity / capacity (high risk, high reward) so Delegate overflows to 4626 investments.
+		4626 is more liquid, goes straight to users w/o fees, and has better snitch protections (low risk, low reward).
 	@returns
 		bool - if we realized profit or not
 		uint256 - profit withdrawn (in assets)
@@ -817,6 +828,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 		net = principal - amount
 		self.vault_investments[_vault] = 0 # erase debt so no replay attacks
 		# TODO calculate asset/share price slippage even if # shares are expected 
+		# make sure we arent creating the loss ourselves by withdrawing too much at once
 		self._update_shares(net, True)
 	elif amount > principal:
 		# withdrawing profit (+ maybe principal if != 0)
@@ -893,13 +905,13 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 	performance_fee: uint256 = self._calc_and_mint_fee(self, self.owner, shares_earned, self.fees.performance, FEE_TYPES.PERFORMANCE)
 
 	collector_fee: uint256 = self._calc_fee(shares_earned, self.fees.collector)
-	if (collector_fee != 0 and msg.sender != self.owner):
+	if (collector_fee != 0 and msg.sender != self.owner): # lazy eval saves SLOAD
 		# NOTE: only _calc not _mint_and_calc so caller gets collector fees in raw asset for easier MEV
 		# NOTE: use pre performance fee inflation price for payout
-		collect_assets: uint256 = collector_fee * share_price
-		self.total_assets -= collect_assets
-		self._erc20_safe_transfer(asset, msg.sender, collect_assets)
-		log FeesGenerated(self, msg.sender, collector_fee, shares_earned, FEE_TYPES.COLLECTOR)
+		collector_assets: uint256 = collector_fee * share_price
+		self.total_assets -= collector_assets
+		self._erc20_safe_transfer(ASSET, msg.sender, collector_assets)
+		log FeesGenerated(self, ASSET, collector_assets, interest_earned, FEE_TYPES.COLLECTOR, msg.sender)
 
 	return performance_fee + collector_fee
 
@@ -931,7 +943,7 @@ def _deposit(
 	# use original price, opposite of _withdraw, requires them to deposit more _assets than current price post fee inflation
 	self._mint(_receiver, shares, _assets)
 
-	assert IERC20(asset).transferFrom(msg.sender, self, _assets) # dev: asset.transferFrom() failed on deposit
+	assert IERC20(ASSET).transferFrom(msg.sender, self, _assets) # dev: asset.transferFrom() failed on deposit
 
 	log Deposit(shares, _receiver, msg.sender, _assets)
 	# log price change after deposit and fee inflation
@@ -957,12 +969,12 @@ def _withdraw(
 	# make them burn extra shares instead of inflating total supply.
 	# use _calc not _mint_and_calc. 
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
-	log FeesGenerated(_receiver, self.owner, withdraw_fee, shares,  FEE_TYPES.WITHDRAW) # log potential fees for product analytics
+	log FeesGenerated(_receiver, self, withdraw_fee, shares,  FEE_TYPES.WITHDRAW, self) # log potential fees for product analytics
 
 	#  remove _assets/shares from pool
 	# NOTE: _transfer in _burn checks callers approval to operate owner's assets
 	self._burn(_receiver, shares + withdraw_fee, _assets)
-	self._erc20_safe_transfer(asset, _receiver, _assets)
+	self._erc20_safe_transfer(ASSET, _receiver, _assets)
 
 	log Withdraw(shares, _owner, _receiver, msg.sender, _assets)
 	log TrackSharePrice(share_price, share_price, self._get_share_APR()) # log price/apr for product analytics
@@ -971,6 +983,7 @@ def _withdraw(
 
 
 @internal
+@nonreentrant("price_update")
 def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256):
 	"""
 	@return diff in APR, diff in owner fees
@@ -1037,6 +1050,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	log TrackSharePrice(init_share_price, self._get_share_price(), self._get_share_APR())
 
 @internal
+@nonreentrant("price_update")
 def _unlock_profits() -> uint256:
 	locked_profit: uint256 = self._calc_locked_profit()
 	vested_profits: uint256 = self.locked_profit - locked_profit
@@ -1076,17 +1090,17 @@ def _get_share_APR() -> int256:
 @view
 @internal
 def _calc_locked_profit() -> uint256:
-    pct_profit_locked: uint256 = (block.timestamp - self.last_report) * self.vesting_rate
+	pct_profit_locked: uint256 = (block.timestamp - self.last_report) * self.vesting_rate
 
-    if(pct_profit_locked < DEGRADATION_COEFFICIENT):
-        locked_profit: uint256 = self.locked_profit
-        return locked_profit - (
-                pct_profit_locked
-                * locked_profit
-                / DEGRADATION_COEFFICIENT
-            )
-    else:        
-        return 0
+	if(pct_profit_locked < DEGRADATION_COEFFICIENT):
+		locked_profit: uint256 = self.locked_profit
+		return locked_profit - (
+				pct_profit_locked
+				* locked_profit
+				/ DEGRADATION_COEFFICIENT
+			)
+	else:        
+		return 0
 
 
 @view
@@ -1114,7 +1128,7 @@ def _get_pool_symbol(_asset: address, _symbol: String[9]) -> String[18]:
 	success: bool = False
 	_sym: Bytes[18] = b""
 	success, _sym = raw_call(
-		asset,
+		_asset,
 		method_id("symbol()"),
 		max_outsize=18,
 		is_static_call=True,
@@ -1181,7 +1195,7 @@ def _get_pool_decimals(_token: address) -> uint8:
 @view
 @external
 def maxFlashLoan(_token: address) -> uint256:
-	if _token != asset:
+	if _token != ASSET:
 		return 0
 	else:
 		return self._get_max_liquid_assets()
@@ -1192,15 +1206,12 @@ def _get_flash_fee(_token: address, _amount: uint256) -> uint256:
 	"""
 	@notice slight wrapper _calc_fee to account for liquid assets that can be lent
 	"""
-	if self.fees.flash == 0:
-		return 0
-	else:
-		return self._calc_fee(min(_amount, self._get_max_liquid_assets()), self.fees.flash)
+	return self._calc_fee(min(_amount, self._get_max_liquid_assets()), self.fees.flash)
 
 @view
 @external
 def flashFee(_token: address, _amount: uint256) -> uint256:
-	assert _token == asset
+	assert _token == ASSET
 	return self._get_flash_fee(_token, _amount)
 
 @external
@@ -1214,15 +1225,15 @@ def flashLoan(
 	assert amount <= self._get_max_liquid_assets()
 
 	# give them the flashloan
-	self._erc20_safe_transfer(asset, msg.sender, amount)
+	self._erc20_safe_transfer(ASSET, msg.sender, amount)
 
 	fee: uint256 = self._get_flash_fee(_token, amount)
-	log FeesGenerated(msg.sender, self, fee, amount, FEE_TYPES.FLASH)
+	log FeesGenerated(msg.sender, ASSET, fee, amount, FEE_TYPES.FLASH, self)
 
 	# ensure they can receive flash loan and are ERC3156 compatible
 	assert IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender, _token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan")
 
-	IERC20(asset).transferFrom(msg.sender, self, amount + fee)
+	IERC20(ASSET).transferFrom(msg.sender, self, amount + fee)
 
 	self._update_shares(fee)
 
@@ -1248,7 +1259,7 @@ def v() -> String[18]:
 @view
 @external
 def n() -> String[18]:
-    return CONTRACT_NAME
+	return CONTRACT_NAME
 
 @view
 @internal
@@ -1323,19 +1334,19 @@ def permit(owner: address, spender: address, amount: uint256, deadline: uint256,
 @view
 @external
 def name() -> String[50]:
-    return NAME
+	return NAME
 
 
 @view
 @external
 def symbol() -> String[18]:
-    return SYMBOL
+	return SYMBOL
 
 
 @view
 @external
 def decimals() -> uint8:
-    return DECIMALS
+	return DECIMALS
 
 @external
 @view
@@ -1510,10 +1521,10 @@ from vyper.interfaces import ERC20 as IERC20
 
 interface IERC2612:
 	# TODO: standard permit interface. Need to change yearn code for it.
-    # def permit(owner: address, spender: address, amount: uint256, deadline: uint256, v: uint8, r: bytes32, s: bytes32) -> bool: nonpayable
-    def permit(owner: address, spender: address, amount: uint256, deadline: uint256, signature: Bytes[65]) -> bool: nonpayable
-    def nonces(owner: address ) -> uint256: view
-    def DOMAIN_SEPARATOR() -> bytes32: view
+	# def permit(owner: address, spender: address, amount: uint256, deadline: uint256, v: uint8, r: bytes32, s: bytes32) -> bool: nonpayable
+	def permit(owner: address, spender: address, amount: uint256, deadline: uint256, signature: Bytes[65]) -> bool: nonpayable
+	def nonces(owner: address ) -> uint256: view
+	def DOMAIN_SEPARATOR() -> bytes32: view
 
 interface IERC20Detailed: 
 	def name() -> String[18]: view
@@ -1521,134 +1532,152 @@ interface IERC20Detailed:
 	def decimals() -> uint8: view
 
 interface IERC4626:
-    def deposit(assets: uint256, receiver: address)  -> uint256: nonpayable
-    def withdraw(assets: uint256, receiver: address, owner: address) -> uint256: nonpayable
-    def mint(shares: uint256, receiver: address) -> uint256: nonpayable
-    def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
+	def deposit(assets: uint256, receiver: address)  -> uint256: nonpayable
+	def withdraw(assets: uint256, receiver: address, owner: address) -> uint256: nonpayable
+	def mint(shares: uint256, receiver: address) -> uint256: nonpayable
+	def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
 
-    # autogenerated state getters
+	# autogenerated state getters
 
-    # def asset() -> address: view
+	# def asset() -> address: view
 
 	# manually generated getters
 
-    # @notice total underlying assets owned by the pool 
-    def totalAssets() -> uint256: view
-    # @notice amount of shares that the Vault would exchange for the amount of assets provided
-    def convertToShares(assets: uint256) -> uint256: view 
-    # @notice amount of assets that the Vault would exchange for the amount of shares provided
-    def convertToAssets(shares: uint256) -> uint256: view
-    # @notice maximum amount of assets that can be deposited into vault for receiver
-    def maxDeposit(receiver: address) -> uint256: view # @dev returns maxAssets
-    # @notice simulate the effects of their deposit() at the current block, given current on-chain conditions.
-    def previewDeposit(assets: uint256) -> uint256: view
-    # @notice maximum amount of shares that can be deposited into vault for receiver
-    def maxMint(receiver: address) -> uint256: view # @dev returns maxAssets
-    # @notice simulate the effects of their mint() at the current block, given current on-chain conditions.
-    def previewMint(shares: uint256) -> uint256: view
-    # @notice maximum amount of assets that can be withdrawn into vault for receiver
-    def maxWithdraw(receiver: address) -> uint256: view # @dev returns maxAssets
-    # @notice simulate the effects of their withdraw() at the current block, given current on-chain conditions.
-    def previewWithdraw(assets: uint256) -> uint256: view
-    # @notice maximum amount of shares that can be withdrawn into vault for receiver
-    def maxRedeem(receiver: address) -> uint256: view # @dev returns maxAssets
-    # @notice simulate the effects of their redeem() at the current block, given current on-chain conditions.
-    def previewRedeem(shares: uint256) -> uint256: view
+	# @notice total underlying assets owned by the pool 
+	def totalAssets() -> uint256: view
+	# @notice amount of shares that the Vault would exchange for the amount of assets provided
+	def convertToShares(assets: uint256) -> uint256: view 
+	# @notice amount of assets that the Vault would exchange for the amount of shares provided
+	def convertToAssets(shares: uint256) -> uint256: view
+	# @notice maximum amount of assets that can be deposited into vault for receiver
+	def maxDeposit(receiver: address) -> uint256: view # @dev returns maxAssets
+	# @notice simulate the effects of their deposit() at the current block, given current on-chain conditions.
+	def previewDeposit(assets: uint256) -> uint256: view
+	# @notice maximum amount of shares that can be deposited into vault for receiver
+	def maxMint(receiver: address) -> uint256: view # @dev returns maxAssets
+	# @notice simulate the effects of their mint() at the current block, given current on-chain conditions.
+	def previewMint(shares: uint256) -> uint256: view
+	# @notice maximum amount of assets that can be withdrawn into vault for receiver
+	def maxWithdraw(receiver: address) -> uint256: view # @dev returns maxAssets
+	# @notice simulate the effects of their withdraw() at the current block, given current on-chain conditions.
+	def previewWithdraw(assets: uint256) -> uint256: view
+	# @notice maximum amount of shares that can be withdrawn into vault for receiver
+	def maxRedeem(receiver: address) -> uint256: view # @dev returns maxAssets
+	# @notice simulate the effects of their redeem() at the current block, given current on-chain conditions.
+	def previewRedeem(shares: uint256) -> uint256: view
 
 # 4626 extension for referrals
 interface IERC4626R:
-    def depositWithReferral(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
-    def mintWithReferral(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+	def depositWithReferral(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
+	def mintWithReferral(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
 
 # 4626 extension for permits
 interface IERC4626P:
-    def depositWithPermit(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
-    def mintWithPermit(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
-    def depositWithPermit2(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
-    def mintWithPermit2(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+	def depositWithPermit(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
+	def mintWithPermit(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
+	def depositWithPermit2(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
+	def mintWithPermit2(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
 
 
 # Flashloans
 interface IERC3156:
-    # /**
-    # * @dev The amount of currency available to be lent.
-    # * @param token The loan currency.
-    # * @return The amount of `token` that can be borrowed.
-    # */
-    def maxFlashLoan(token: address) -> uint256: view
+	# /**
+	# * @dev The amount of currency available to be lent.
+	# * @param token The loan currency.
+	# * @return The amount of `token` that can be borrowed.
+	# */
+	def maxFlashLoan(token: address) -> uint256: view
 
-    # /**
-    # * @dev The fee to be charged for a given loan.
-    # * @param token The loan currency.
-    # * @param amount The amount of tokens lent.
-    # * @return The amount of `token` to be charged for the loan, on top of the returned principal.
-    # */
-    def flashFee(token: address, amount: uint256) -> uint256: view
+	# /**
+	# * @dev The fee to be charged for a given loan.
+	# * @param token The loan currency.
+	# * @param amount The amount of tokens lent.
+	# * @return The amount of `token` to be charged for the loan, on top of the returned principal.
+	# */
+	def flashFee(token: address, amount: uint256) -> uint256: view
 
-    # /**
-    # * @dev Initiate a flash loan.
-    # * @param receiver The receiver of the tokens in the loan, and the receiver of the callback.
-    # * @param token The loan currency.
-    # * @param amount The amount of tokens lent.
-    # * @param data Arbitrary data structure, intended to contain user-defined parameters.
-    # */
-    def flashLoan(
-        receiver: address,
-        token: address,
-        amount: uint256,
-        data: Bytes[25000]
-    ) -> bool: payable
+	# /**
+	# * @dev Initiate a flash loan.
+	# * @param receiver The receiver of the tokens in the loan, and the receiver of the callback.
+	# * @param token The loan currency.
+	# * @param amount The amount of tokens lent.
+	# * @param data Arbitrary data structure, intended to contain user-defined parameters.
+	# */
+	def flashLoan(
+		receiver: address,
+		token: address,
+		amount: uint256,
+		data: Bytes[25000]
+	) -> bool: payable
 
 
 interface IERC3156FlashBorrower:
-    def onFlashLoan(
-        initiator: address,
-        token: address,
-        amount: uint256,
-        fee: uint256,
-        data:  Bytes[25000]
-    ) -> bytes32: payable
+	def onFlashLoan(
+		initiator: address,
+		token: address,
+		amount: uint256,
+		fee: uint256,
+		data:  Bytes[25000]
+	) -> bytes32: payable
+
+
+interface IFeeGenerator:
+	def owner() -> address: nonpayable
+	def pending_owner() -> address: nonpayable
+	def set_owner(new_owner: address) -> bool: nonpayable
+	def accept_owner() -> bool: nonpayable
+
+	def fee_recipient() -> address: nonpayable
+	def pending_fee_recipient() -> address: nonpayable
+	def set_fee_recipient(new_recipient: address) -> bool: nonpayable
+	def accept_fee_recipient() -> bool: nonpayable
+
+	#  @notice optional. MAY do push payments. if push payments then revert\;
+	def claim_fees(_token: address, _amount: uint256) -> bool: nonpayable
+	#  @notice optional. Requires mutualConsent. Must return IFeeGenerator.payInvoice.selector if function is supported.
+	# def accept_invoice(_from: address, _token: address, _amount: uint256, _note: String[2048]) -> uint256: nonpayable
+
 
 
 # Debt DAO interfaces
 
 interface ISecuredLine:
-    def ids(index: uint256) -> bytes32: view
-    def status() -> uint256: view
-    def credits(id: bytes32) -> Position: view
-    def available(id: bytes32) -> (uint256, uint256): view
+	def ids(index: uint256) -> bytes32: view
+	def status() -> uint256: view
+	def credits(id: bytes32) -> Position: view
+	def available(id: bytes32) -> (uint256, uint256): view
 
 
 	# invest
-    def addCredit(
-        drate: uint128,
-        frate: uint128,
-        amount: uint256,
-        token: address,
-        lender: address
-    )-> bytes32: payable
-    def setRates(id: bytes32, drate: uint128, frate: uint128) -> bool: nonpayable
-    def increaseCredit(id: bytes32,  amount: uint256) -> bool: payable
+	def addCredit(
+		drate: uint128,
+		frate: uint128,
+		amount: uint256,
+		token: address,
+		lender: address
+	)-> bytes32: payable
+	def setRates(id: bytes32, drate: uint128, frate: uint128) -> bool: nonpayable
+	def increaseCredit(id: bytes32,  amount: uint256) -> bool: payable
 
-    # self-repay
-    def useAndRepay(amount: uint256) -> bool: nonpayable
+	# self-repay
+	def useAndRepay(amount: uint256) -> bool: nonpayable
 
-    # divest
-    def withdraw(id: bytes32,  amount: uint256) -> bool: nonpayable
+	# divest
+	def withdraw(id: bytes32,  amount: uint256) -> bool: nonpayable
 
 	# leverage
-    def borrow(id: bytes32,  amount: uint256) -> bool: nonpayable
+	def borrow(id: bytes32,  amount: uint256) -> bool: nonpayable
 
 
 # (uint256, uint256, uint256, uint256, uint8, address, address)
 struct Position:
-    deposit: uint256
-    principal: uint256
-    interestAccrued: uint256
-    interestRepaid: uint256
-    decimals: uint8
-    token: address
-    lender: address
+	deposit: uint256
+	principal: uint256
+	interestAccrued: uint256
+	interestRepaid: uint256
+	decimals: uint8
+	token: address
+	lender: address
 
 ### Events
 
@@ -1711,24 +1740,27 @@ event DivestVault:
 	is_profit: bool
 
 # fees
+
 event UpdateFee:
 	fee_bps: indexed(uint16)
 	fee_type: indexed(FEE_TYPES)
 
 event NewPendingFeeRecipient:
-	newRecipient: address # New active management fee
+	new_recipient: address # New active management fee
 
 event AcceptFeeRecipient:
-	newRecipient: address # New active management fee
+	fee_recipient: address # New active management fee
+
 
 event FeesGenerated:
-	payer: indexed(address)
-	receiver: indexed(address)
-	fee: indexed(uint256)
-	shares: uint256 # total shares fees were generated on (interest, deposit, flashloan)
-	feeType: FEE_TYPES # self.fees enum index
+	payer: indexed(address) # where fees are being paid from
+	token: indexed(address) # where fees are being paid from
+	fee: indexed(uint256) # tokens paid in fees, denominated in 
+	amount: uint256 # total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
+	fee_type: FEE_TYPES # uint maps to app specific fee enum
+	receiver: address # who is getting the fees paid
 
-event OwnerFeeClaimed:
+event FeesClaimed:
 	recipient: indexed(address)
 	fees: indexed(uint256)
 
@@ -1736,7 +1768,7 @@ event OwnerFeeClaimed:
 # Admin updates
 
 event NewPendingOwner:
-	pendingOwner: indexed(address)
+	pending_owner: indexed(address)
 
 event UpdateOwner:
 	owner: indexed(address) # New active governance
