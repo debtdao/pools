@@ -14,3 +14,7 @@ share/
 lib/
 
 docs/*.svg
+
+# Foundry
+out/
+yarn-error.log
