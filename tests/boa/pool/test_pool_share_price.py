@@ -12,7 +12,7 @@ from math import exp
 
 # TODO Ask ChatGPT to generate test cases in vyper
 # "price" definition = total_assets / total_supply in 4626 token. Price increase could be due to increase in assets or decrease in supply
-# fuzzing params - amount, Fees, initial share price 
+# fuzzing params - amount, Fees, initial share price, vesting_rate ^v, vesting_time ^t = time between price change and blocktime when price tests get run
 
 # 1. price always immediately decreases (asset decrease) on divest and impair calls if no accrued_fees
 # 1. price always immediately increases (supply decrease) if impairment burns accrued_fees
@@ -30,4 +30,8 @@ from math import exp
 # 1. calling unlock_profit() MUST NOT share price if block.timestamp == last_report
 # 1. calling unlock_profit() MUST update last_report to equal block.timestamp
 
-
+# INVARIANTS
+# 1. share price changes (+/-)  based on supply/assets
+# 1. locked_profit^t = total_interest_earned * vesting_rate^t -- (t = 0, locked_profit = 0, t = 1, locked_profit = all_profit, t = 10, locked_profit = all_profit - vested_profit)
+# 1. total_assets^t = total_assets + (total_interest_earned * vesting_rate^t) -- (t = 0, total_assets = total_assets, t = 1, total_assets + vested_profit = all_profit, t = 10, total_assets = total_assets + vested_profit)
+# 1. price^t = total_assets^t / shares -- use derived total_assets^t from above

@@ -3,6 +3,10 @@
 # 1. pool can borrow from line where they are borrower (0 collateral, 0% interest)
 # 1. cannot borrow from a position that isnt denominated in pool asset
 # 1. Pool MUST repay all debt if total_assets are available and they are in  DEFUALT/INSOLVENT status
+# 1. anyone can call emergency_repay to repay debt on defaulted lines
+# 1. emergency_repay MUST NOT work on ACTIVE lines
+# 1. emergency_repay MUST slash accrued_fees and pool assets if successful
+
 # 1. MUST NOT repay debt to line where pool isnt borrower
 # 1. Pool shareholders cannot redeem debt assets, only users deposits
 # 1. Can use debt assets to invest into LoC 

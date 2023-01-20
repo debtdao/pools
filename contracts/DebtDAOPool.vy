@@ -71,10 +71,6 @@ interface IDebtDAOPool:
 ### Constants
 ### TODO only making public for testing purposes. ideally could remain private but still have easy access from tests
 
-# @notice LineLib.STATUS.INSOLVENT
-INSOLVENT_STATUS: public(constant(uint256)) = 4
-# @notice LineLib.STATUS.REPAID
-REPAID_STATUS: public(constant(uint256)) = 3
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
 FEE_COEFFICIENT: public(constant(uint16)) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
@@ -142,7 +138,10 @@ min_deposit: public(uint256)
 # maximum amount of asset deposits to allow into pool
 max_assets: public(uint256)
 # total amount of asset held externally in lines or vaults
+# @dev 0 <= total_deployed <= total_assets + debt_principal
 total_deployed: public(uint256)
+# total notional amount of ASSET borrowed from lines. Does not include interest owed.
+debt_principal: public(uint256)
 # amount of assets held by external 4626 vaults. used to calc profit/loss on non-line investments
 vault_investments: public(HashMap[address, uint256])
 
@@ -323,7 +322,7 @@ def impair(line: address, id: bytes32) -> (uint256, uint256):
 	@param line - line of credit contract to call
 	@param id   - credit position on line controlled by this pool 
 	"""
-	assert ISecuredLine(line).status() == INSOLVENT_STATUS
+	assert ISecuredLine(line).status() == LINE_STATUS.INSOLVENT
 
 	position: Position = ISecuredLine(line).credits(id)
 
@@ -374,6 +373,9 @@ def invest_vault(_vault: address, _amount: uint256) -> uint256:
 @external
 @nonreentrant("lock")
 def divest_vault(_vault: address, _amount: uint256) -> bool:
+	"""
+	TODO How to account for vault withdraw fees automatically making is_loss true whenever this is called. Even withcout snitch fee being profitable u could DOS Delegate by constantly reverting
+	"""
 	is_loss: bool = False
 	net: uint256 = 0
 	(is_loss, net) = self._divest_vault(_vault, _amount)
@@ -599,7 +601,7 @@ def borrow(_line: address, _id: bytes32, _amount: uint256):
 
 	assert pre_balance + _amount == post_balance
 	self.total_assets += _amount
-	# self.debt_owed += _amount
+	self.debt_principal += _amount
 
 
 @external
@@ -612,7 +614,7 @@ def repay_debt(_line: address, _amount: uint256):
 		 also adds security risk but less than giving full control of ur asset to Delegate
 	"""	
 	assert self == ISecuredLine(_line).borrower()
-	assert REPAID_STATUS != ISecuredLine(_line).status()
+	assert LINE_STATUS.REPAID != ISecuredLine(_line).status()
 	
 	# TODO add conditional on line status. if DEFAUL or INSOLVENT then earn snitch fee
 	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
@@ -629,8 +631,24 @@ def repay_debt(_line: address, _amount: uint256):
 	
 	assert pre_balance - _amount == post_balance
 	self.total_assets -= _amount
-	# self.debt_owed -= _amount
+	# TODO TEST is this the only accounting we need to do? how do we know this isnt conflicting with self.total_assets?
+	self.debt_principal -= _amount
+	# TODO this doesnt account for interest payments. Maybe we track debt to individual lines like we do vaults and do more math.
 
+@external
+@nonreentrant("lock")
+def emergency_repay(_line: address, _amount: uint256):
+	assert self == ISecuredLine(_line).borrower()
+	status: LINE_STATUS = ISecuredLine(_line).status()
+	assert LINE_STATUS.LIQUIDATABLE == status or LINE_STATUS.INSOLVENT == status
+	assert _amount <= self._get_max_liquid_assets()
+	# force debt repayment and payout snitch fee if applicable
+	# normally we dont comingle depositor vs debt assets but in the case of default lenders get priority over depositors
+	# Delegate is responsible for making timely payments from available debt to avoid emergency_repay situation
+	self._update_shares(_amount, True)
+	self.debt_principal -= _amount
+	assert IERC20(ASSET).approve(_line, _amount) # debt/repayment can only be in base asset
+	assert ISecuredLine(_line).depositAndRepay(_amount)
 
 ####################################
 ####################################
@@ -1711,11 +1729,28 @@ interface IRevenueGenerator:
 	# def accept_invoice(_from: address, _token: address, _amount: uint256, _note: String[2048]) -> uint256: nonpayable
 
 # Debt DAO interfaces
+# @notice LineLib.STATUS
+enum LINE_STATUS:
+	UNINITIALIZED
+	ACTIVE
+	LIQUIDATABLE
+	REPAID
+	INSOLVENT
+
+# (uint256, uint256, uint256, uint256, uint8, address, address)
+struct Position:
+	deposit: uint256
+	principal: uint256
+	interestAccrued: uint256
+	interestRepaid: uint256
+	decimals: uint8
+	token: address
+	lender: address
 
 interface ISecuredLine:
 	def borrower() -> address: pure
 	def ids(index: uint256) -> bytes32: view
-	def status() -> uint256: view
+	def status() -> LINE_STATUS: view
 	def credits(id: bytes32) -> Position: view
 	def available(id: bytes32) -> (uint256, uint256): view
 
@@ -1740,17 +1775,6 @@ interface ISecuredLine:
 
 	# leverage
 	def borrow(id: bytes32,  amount: uint256) -> bool: nonpayable
-
-
-# (uint256, uint256, uint256, uint256, uint8, address, address)
-struct Position:
-	deposit: uint256
-	principal: uint256
-	interestAccrued: uint256
-	interestRepaid: uint256
-	decimals: uint8
-	token: address
-	lender: address
 
 ### Events
 

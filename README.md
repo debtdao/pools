@@ -75,6 +75,8 @@ $ >>>>> asset = boa.load('tests/mocks/MockERC20.vy', 'An Asset To Lend', 'LEND',
 $ >>>>> asset._mint_for_testing(admin, mint_amount, sender=admin)
 $ >>>>> asset.approve(pool, mint_amount, sender=admin)
 $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
+$ >>>>> boa.env.time_travel(seconds=1000)
+$ >>>>> pool.unlock_profit()
 ```
 
 

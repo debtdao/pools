@@ -80,6 +80,9 @@ def test_deposit(pool, base_asset, me, admin, amount, assets, shares, deposit_fe
     base_asset.approve(pool, amount, sender=me) 
     shares_created = pool.deposit(amount, me, sender=me) 
 
+    # TODO TEST Deposit event emitted with right params
+    # pool.get_logs()
+
     # expected_shares = round(amount / share_price)
     expected_shares = math.floor(amount / share_price)
     # ensure right price for shares
@@ -100,13 +103,14 @@ def test_deposit(pool, base_asset, me, admin, amount, assets, shares, deposit_fe
 
 # TEST all events properly emitted 
 # deposit/withdraw
-# fee events
 
 
 # TEST invariants
 # total supply with mint/burn
 # share price changes (+/-) 
 # share price based on supply/assets
+# total_assests + locked_profit 
+# price^t = total_assets + (locked_profit * vesting_rate^t)
 
 # https://github.com/fubuloubu/ERC4626/blob/main/tests/test_methods.py
 
