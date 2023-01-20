@@ -1691,6 +1691,7 @@ interface IERC3156FlashBorrower:
 		data:  Bytes[25000]
 	) -> bytes32: payable
 
+
 interface IRevenueGenerator:
 	def owner() -> address: view
 	def pending_owner() -> address: view
@@ -1706,10 +1707,8 @@ interface IRevenueGenerator:
 	def claimable_rev(_token: address) -> uint256: view
 	#  @notice optional. MAY do push payments. if push payments then revert.
 	def claim_rev(_token: address, _amount: uint256) -> bool: nonpayable
-	#  @notice optional. Requires mutualConsent. Must return IFeeGenerator.payInvoice.selector if function is supported.
+	#  @notice optional. Requires mutualConsent. Must return IRevenueGenerator.payInvoice.selector if function is supported.
 	# def accept_invoice(_from: address, _token: address, _amount: uint256, _note: String[2048]) -> uint256: nonpayable
-
-
 
 # Debt DAO interfaces
 

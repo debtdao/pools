@@ -14,8 +14,21 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 # TODO Ask ChatGPT to generate test cases in vyper
 
 # line of credit integration tests
-# owner priviliges
-# fee updates/settings
+# delegate priviliges on investment functions
+# fee updates in state
+# fee updates in affect deposit/withdraw pricing
+
+# Debt DAO Ponzinomics Test
+# making a Spigot rev_recipient and claim revenue
+# deploy a LoC, config Spigot, pool can borrow from line
+# Can use debt assets to invest into LoC 
+# Can use debt assets to invest into vaults
+# Pool shareholders cannot redeem debt assets, only users deposits
+# 
+# can addCollateral to line escrow
+# addCollateral increases self.total_deployed
+# addCollateral reduces self.total_assets
+
 
 # @settings(max_examples=500, deadline=timedelta(seconds=1000))
 # def test_owner_fees_burned_on_impairment(pool, me, admin):
