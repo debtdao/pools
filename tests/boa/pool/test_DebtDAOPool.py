@@ -13,22 +13,25 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 # TODO Ask ChatGPT to generate test cases in vyper
 
-# line of credit integration tests
-# delegate priviliges on investment functions
-# fee updates in state
-# fee updates in affect deposit/withdraw pricing
+# 1. delegate priviliges on investment functions
+# 1. vault investments go up by _amount 
+# 1. only vault that gets deposited into has amount changed
+# 1. investing in vault increased total_deployed by _amount
 
-# Debt DAO Ponzinomics Test
-# making a Spigot rev_recipient and claim revenue
-# deploy a LoC, config Spigot, pool can borrow from line
-# Can use debt assets to invest into LoC 
-# Can use debt assets to invest into vaults
-# Pool shareholders cannot redeem debt assets, only users deposits
-# 
-# can addCollateral to line escrow
-# addCollateral increases self.total_deployed
-# addCollateral reduces self.total_assets
+# 1. investing in vault increases our balanceOf 4626 token by shares returned in vault.deposit
+# 1. investing in vault increases our balanceOf 4626 token by expected shares using _amount and pre-deposit share price
+# 1. 
+# 1. divesting vault decreases total_deployed
+# 1. divesting vault decreases total_deployed
+# 1. divesting vault decreases our balanceOf 4626 token
+# 1. divesting vault decreases our balanceOf 4626 token by shares returned in vault.withdraw
+# 1. divesting vault decreases our balanceOf 4626 token by expected shares using _amount and pre-withdraw share price
 
+# 1. fee updates in state
+# 1. fee updates in affect deposit/withdraw pricing
+
+# major internal funcs
+# 1. _reduce_credit with 0 will only withdraw available interest (test withdrawable, )
 
 # @settings(max_examples=500, deadline=timedelta(seconds=1000))
 # def test_owner_fees_burned_on_impairment(pool, me, admin):
