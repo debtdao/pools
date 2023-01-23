@@ -39,24 +39,20 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 # TODO add fuzzing for deposit fee and share price
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_deposit(pool, base_asset, me, admin,
+def test_deposit(pool, base_asset, me, admin, init_token_balances,
                 amount, assets, shares, deposit_fee):
     """
     Test share price before and after first person enters the pool
     init_token_balances does deposit flow in ../conftest.py
     """
-    # _amnt = 10**25
-    # amount, assets, shares, deposit_fee = [_amnt, _amnt, _amnt, MAX_PITTANCE_FEE]
-    assert pool.balanceOf(me) == 0
+    assert pool.balanceOf(me) == init_token_balances
     base_asset._mint_for_testing(me, amount)
-    assert base_asset.balanceOf(me) == amount
-
-    # print("TESTING DEPOSIT")
-    # print(assets, shares, deposit_fee)
+    new_balance = init_token_balances + amount
+    assert base_asset.balanceOf(me) == new_balance
     
     # handle fuzzing vars math for share price
     expected_share_price = 1
-    if shares == 0 or assets == 0:
+    if shares == 0 or assets == 0: # nothing to price
         expected_share_price = 1
     elif assets / shares < 1: # fixed point math round down
         expected_share_price = 0
@@ -64,6 +60,7 @@ def test_deposit(pool, base_asset, me, admin,
         # TODO What happens in contract if share price == 0 ????
     else:
         # expected_share_price = round(assets / shares)
+        # evm always rounds down
         expected_share_price = math.floor(assets / shares)
 
 
@@ -71,6 +68,10 @@ def test_deposit(pool, base_asset, me, admin,
     pool.eval(f'self.total_assets = {assets}')
     pool.eval(f'self.total_supply = {shares}')
     share_price = pool.price() # pre deposit price is used in _deposit() for calculating shares returned
+
+    if share_price == 0:
+        return # cant deposit if no price
+
     # _assert_uint_with_rounding(share_price, expected_share_price)
 
     # fees_generated = round((amount * deposit_fee) / FEE_COEFFICIENT / share_price)
@@ -81,7 +82,7 @@ def test_deposit(pool, base_asset, me, admin,
     shares_created = pool.deposit(amount, me, sender=me) 
 
     # test event emissions
-    # TODO python bug on get_logs(). `Error: cant cast to Int``
+    # TODO python bug on get_logs(). `Error: cant cast to Int`
     # logs = pool.get_logs()
     # print(logs) 
 

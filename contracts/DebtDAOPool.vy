@@ -434,7 +434,7 @@ def accept_owner() -> bool:
 	new_owner: address = self.pending_owner
 	assert msg.sender == new_owner, "not pending owner"
 	self.owner = new_owner
-	log UpdateOwner(new_owner)
+	log AcceptOwner(new_owner)
 	return True
 
 # THS IS COOL^
@@ -1784,12 +1784,12 @@ interface ISecuredLine:
 event Transfer:
 	sender: indexed(address)
 	receiver: indexed(address)
-	value: uint256
+	amount: indexed(uint256)
 
 event Approval:
 	owner: indexed(address)
 	spender: indexed(address)
-	value: uint256
+	amount: indexed(uint256)
 
 # IERC4626 Events
 event Deposit:
@@ -1867,7 +1867,7 @@ event RevenueClaimed:
 event NewPendingOwner:
 	new_recipient: indexed(address)
 
-event UpdateOwner:
+event AcceptOwner:
 	new_recipient: indexed(address) # New active governance
 
 event UpdateMinDeposit:

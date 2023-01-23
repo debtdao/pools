@@ -9,7 +9,7 @@ def borrower():
     return boa.env.generate_address()
 
 @pytest.fixture(scope="session")
-def roles():
+def pool_roles():
     return ['owner', 'rev_recipient']
 
 # @pytest.fixture(scope="session")

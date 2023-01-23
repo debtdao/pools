@@ -8,14 +8,14 @@ from vyper.interfaces import ERC20 as IERC20
 implements: IERC20
 
 event Transfer:
-    _from: indexed(address)
-    _to: indexed(address)
-    _value: uint256
+	sender: indexed(address)
+	receiver: indexed(address)
+	amount: indexed(uint256)
 
 event Approval:
-    _owner: indexed(address)
-    _spender: indexed(address)
-    _value: uint256
+	owner: indexed(address)
+	spender: indexed(address)
+	amount: indexed(uint256)
 
 name: immutable(String[64])
 symbol: immutable(String[32])
