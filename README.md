@@ -6,8 +6,8 @@ TODO:
 ## Installation
 
 ```bash
-   pip install -r ape-requirements.txt
-   pip install -r boa-requirements.txt
+   pip install -r prod-requirements.txt
+   pip install -r dev-requirements.txt
    ape plugins install .
    forge install
 ```

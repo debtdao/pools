@@ -91,7 +91,7 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
             # assert logs1[0].receiver == receiver
             # assert logs1[0].amount == 0
 
-            with boa.reverts():  # TODO expect right revert msg
+            with boa.reverts():  # TODO expect revert msg
                 # Expected insufficient funds failure
                 token.transfer(receiver, post_sender_balance + 1, sender=sender)
 

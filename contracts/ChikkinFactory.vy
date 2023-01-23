@@ -40,7 +40,7 @@ event DeployPool:
     delegate: indexed(address)
     token: indexed(address)
 
-event DeployPoolChikkinBondz:
+event DeplotPoolChikkinBondz:
     bond_manager: indexed(address)
     bond_token: indexed(address)
 
@@ -144,7 +144,7 @@ def deploy_pool(_owner: address, _token: address, _name: String[50], _symbol: St
 
     log DeployPool(pool, _owner, _token)
     
-### ALL CODE BELOW THIS POINT IS NON-ESSENTIAL FUNCTIONALITY TO DEBT DAIO
+### ALL CODE BELOW THIS POINT IS NON-ESSENTIAL FUNCTIONALITY TO DEBT DAO
 
     if _initial_deposit != 0:
         self._bondooooor(pool, _token, _initial_deposit)
@@ -152,16 +152,16 @@ def deploy_pool(_owner: address, _token: address, _name: String[50], _symbol: St
     return pool
 
 @external
-def deplot_ze_chikkins(_vault: address) -> (address, address):
+def deplot_ze_chikkinz(_vault: address) -> (address, address):
     """
     @notice
         Only deploy chikkin bonds, not associated liquidity pool
     """
     asset: address = IERC4626(_vault).asset()
-    return self._deplot_ze_chikkins(_vault, asset)
+    return self._deplot_chikkin_bond(_vault, asset)
 
 @external
-def fight_for_chikkin_sovreignty(_vault: address, _initial_deposit: uint256) -> (address, address, address):
+def deplot_chikkin_ponzi(_vault: address, _initial_deposit: uint256) -> (address, address, address):
     asset: address = IERC4626(_vault).asset()
     # return bond token + base pool + bond pool
     return self._bondooooor(_vault, asset, _initial_deposit)
@@ -183,7 +183,7 @@ def _bondooooor(_vault: address, _asset: address, _deposit: uint256) -> (address
 
     manager: address = empty(address)
     bond_token: address = empty(address)
-    (manager, bond_token) = self._deplot_ze_chikkins(_vault, _asset)
+    (manager, bond_token) = self._deplot_chikkin_bond(_vault, _asset)
 
     base_crv_pool: address = empty(address)
     meta_crv_pool: address = empty(address)
@@ -211,7 +211,7 @@ def _bondooooor(_vault: address, _asset: address, _deposit: uint256) -> (address
         return (bond_token, meta_crv_pool, bond_crv_pool)
 
 @internal
-def _deplot_ze_chikkins(pool: address, base_token: address) -> (address, address):
+def _deplot_chikkin_bond(pool: address, base_token: address) -> (address, address):
     """
     @notice         the plot thickens with another chicken. May your bonds be forever unbroken
     @param pool     pool/pool-token to deploy chicken bond for
@@ -235,7 +235,7 @@ def _deplot_ze_chikkins(pool: address, base_token: address) -> (address, address
         salt=keccak256(_abi_encode(pool)) # similiar composite index as lines for chikkin_manager CREATE2. (contract-actor-token)
     )
 
-    log DeployPoolChikkinBondz(chikkin_manager, bddp_token)
+    log DeplotPoolChikkinBondz(chikkin_manager, bddp_token)
 
     return (chikkin_manager, bddp_token)
 

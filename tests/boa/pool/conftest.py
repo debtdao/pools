@@ -8,6 +8,10 @@ import pytest
 def borrower():
     return boa.env.generate_address()
 
+@pytest.fixture(scope="session")
+def roles():
+    return ['owner', 'rev_recipient']
+
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):
         # TODO make mock line contract for investing/impairment

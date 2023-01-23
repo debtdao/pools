@@ -210,7 +210,6 @@ def __init__(
 	# Setup Pool variables
 	self.fees = _fees
 	self.owner = _delegate
-	self.allowances[self][_delegate] = max_value(uint256) # allow owner to take fees
 	self.rev_recipient = _delegate
 	self.max_assets = max_value(uint256)
 
@@ -409,12 +408,12 @@ def sweep(_token: address, _amount: uint256 = max_value(uint256)):
 	value: uint256 = _amount
 	if _token == ASSET:
 		# recover assets sent directly to pool
-		# Can't be used to steal what this Vault is protecting
+		# Can't be used to steal what this pool is protecting
 		value = IERC20(ASSET).balanceOf(self) - (self.total_assets - self.total_deployed)
 	elif _token == self:
 		# recover shares sent directly to pool, minus fees held for owner.
 		value = self.balances[self] - self.accrued_fees
-	elif value == max_value(uint256):
+	elif _amount == max_value(uint256):
 		value = IERC20(_token).balanceOf(self)
 
 	log Sweep(_token, value)
@@ -433,10 +432,8 @@ def set_owner(new_owner: address) -> bool:
 @external
 def accept_owner() -> bool:
 	new_owner: address = self.pending_owner
-	assert msg.sender == new_owner
-	self.allowances[self][self.owner] = 0 # disallow old owner to claim fees
+	assert msg.sender == new_owner, "not pending owner"
 	self.owner = new_owner
-	self.allowances[self][new_owner] = max_value(uint256) # allow owner to take fees
 	log UpdateOwner(new_owner)
 	return True
 
@@ -505,14 +502,14 @@ def set_withdraw_fee(fee: uint16) -> bool:
 
 @external
 def set_rev_recipient(new_recipient: address) -> bool:
-  assert msg.sender == self.rev_recipient
+  assert msg.sender == self.rev_recipient, "not rev_recipient"
   self.pending_rev_recipient = new_recipient
   log NewPendingRevRecipient(new_recipient)
   return True
 
 @external
 def accept_rev_recipient() -> bool:
-  assert msg.sender == self.pending_rev_recipient
+  assert msg.sender == self.pending_rev_recipient, "not pending rev_recipient"
   self.rev_recipient = msg.sender
   log AcceptRevRecipient(msg.sender)
   return True
@@ -534,16 +531,17 @@ def claim_rev(_token: address, _amount: uint256) -> bool:
 	"""
 	assert msg.sender == self.rev_recipient
 	
-	# set amount to claim
 	claimed: uint256 = _amount
 	if _amount == max_value(uint256):
 		claimed = self.accrued_fees # set to max available
 	
 	# transfer fee shares locked in pool to fee recipient
 	self.accrued_fees -= claimed
+	# manually approve bc we can never be msg.sender internally
+	self._approve(self, msg.sender, claimed)
 	self._transfer(self, msg.sender, claimed)
 
-	log FeesClaimed(self.rev_recipient, claimed)
+	log RevenueClaimed(self.rev_recipient, claimed)
 	# log price for product analytics
 	price: uint256 = self._get_share_price()
 	log TrackSharePrice(price, price, self._get_share_APR())
@@ -713,62 +711,66 @@ def mintWithReferral(_shares: uint256, _receiver: address, _referrer: address) -
 @external
 @nonreentrant("lock")
 def withdraw(
-	assets: uint256,
-	receiver: address,
-	owner: address
+	_assets: uint256,
+	_receiver: address,
+	_owner: address
 ) -> uint256:
 	"""
 		@return - shares
 	"""
-	return self._withdraw(assets, owner, receiver)
+	return self._withdraw(_assets, _owner, _receiver)
 
 @external
 @nonreentrant("lock")
-def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
+def redeem(_shares: uint256, _receiver: address, _owner: address) -> uint256:
 	"""
 		@return - assets
 	"""
 	share_price: uint256 = self._get_share_price()
-	return self._withdraw(shares * share_price, owner, receiver) * share_price
+	return self._withdraw(_shares * share_price, _owner, _receiver) * share_price
 
 ### ERC20 Functions
 
 @external
 @nonreentrant("lock")
-def transfer(to: address, amount: uint256) -> bool:
-  return self._transfer(msg.sender, to, amount)
+def transfer(_to: address, _amount: uint256) -> bool:
+  return self._transfer(msg.sender, _to, _amount)
 
 @external
 @nonreentrant("lock")
-def transferFrom(sender: address, receiver: address, amount: uint256) -> bool:
-	return self._transfer(sender, receiver, amount)
+def transferFrom(_sender: address, _receiver: address, _amount: uint256) -> bool:
+	self._assert_caller_has_approval(_sender, _amount)
+	return self._transfer(_sender, _receiver, _amount)
 
 
 @external
-def approve(spender: address, amount: uint256) -> bool:
-	self.allowances[msg.sender][spender] = amount
-	log Approval(msg.sender, spender, amount)
-	return True
+def approve(_spender: address, _amount: uint256) -> bool:
+	return self._approve(msg.sender, _spender, _amount)
 
 @external
 def increaseAllowance(_spender: address, _amount: uint256) -> bool:
-	newApproval: uint256 = self.allowances[msg.sender][_spender] + _amount
-	self.allowances[msg.sender][_spender] = newApproval
-	log Approval(msg.sender, _spender, newApproval)
-	return True
+	return self._approve(msg.sender, _spender, self.allowances[msg.sender][_spender] + _amount)
 
 
 ### Internal Functions 
 
 # transfer + approve vault shares
 @internal
+def _approve(_owner: address, _spender: address, _amount: uint256) -> bool:
+		self.allowances[_owner][_spender] = _amount
+		# NOTE: Allows log filters to have a full accounting of allowance changes
+		log Approval(_owner, _spender, _amount)
+		return True
+
+@internal
 def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
 	# cant block transfer to self bc then we cant store fes for delegate
 	# prevent locking funds and yUSD/CREAM style share price attacks
 	# assert _receiver != self # dev: cant transfer to self
-
+	
+	# BUG: false positive when sender is initiating transfer themself
+	 # TODO rename _sender to _owner and use msg.sender as _sender? 
 	if _sender != empty(address):
-		self._assert_caller_has_approval(_sender, _amount)
 		# if not minting, then ensure _sender has balance
 		self.balances[_sender] -= _amount
 	
@@ -787,10 +789,8 @@ def _assert_caller_has_approval(_owner: address, _amount: uint256) -> bool:
 		allowance: uint256 = self.allowances[_owner][msg.sender]
 		# MAX = unlimited approval (saves an SSTORE)
 		if (allowance < max_value(uint256)):
-			allowance = allowance - _amount
-			self.allowances[_owner][msg.sender] = allowance
-			# NOTE: Allows log filters to have a full accounting of allowance changes
-			log Approval(_owner, msg.sender, allowance)
+			# update caller allowance based on usage
+			self._approve(_owner, msg.sender, allowance - _amount)
 
 	return True
 
@@ -1027,7 +1027,7 @@ def _deposit(
 	if _referrer != empty(address) and self.fees.referral != 0:
 		self._calc_and_mint_fee(_receiver, _referrer, shares, self.fees.referral, FEE_TYPES.REFERRAL)
 
-	# TODO TEST how  deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
+	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
 
 	# use original price, opposite of _withdraw, requires them to deposit more _assets than current price post fee inflation
 	self._mint(_receiver, shares, _assets)
@@ -1051,6 +1051,9 @@ def _withdraw(
 	share_price: uint256 = self._get_share_price()
 	shares: uint256 = _assets / share_price
 	# TODO TEST  https://github.com/fubuloubu/ERC4626/blob/55e22a6757b79abf733bfcaef8d1096311a5314f/contracts/VyperVault.vy#L214-L216
+	
+	# Ensure caller has permission on shares being withdrawn
+	self._assert_caller_has_approval(_owner, shares)
 
 	# TODO TEST how  withdraw fee inflatino affects the shares/asssets that they are *supposed* to lose
 		
@@ -1061,7 +1064,6 @@ def _withdraw(
 	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  FEE_TYPES.WITHDRAW, self) # log potential fees for product analytics
 
 	#  remove _assets/shares from pool
-	# NOTE: _transfer in _burn checks callers approval to operate owner's assets
 	self._burn(_receiver, shares + withdraw_fee, _assets)
 	self._erc20_safe_transfer(ASSET, _receiver, _assets)
 
@@ -1856,18 +1858,17 @@ event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	fee_type: FEE_TYPES 		# maps to app specific fee enum or eventually some standard fee code system
 	receiver: address 		# who is getting the fees paid
 
-event FeesClaimed:
+event RevenueClaimed:
 	recipient: indexed(address)
 	fees: indexed(uint256)
-
 
 # Admin updates
 
 event NewPendingOwner:
-	pending_owner: indexed(address)
+	new_recipient: indexed(address)
 
 event UpdateOwner:
-	owner: indexed(address) # New active governance
+	new_recipient: indexed(address) # New active governance
 
 event UpdateMinDeposit:
 	minimum: indexed(uint256) # New active deposit limit

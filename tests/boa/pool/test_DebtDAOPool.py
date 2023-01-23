@@ -66,7 +66,7 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
     assert pool.accrued_fees() == 0
     assert pool.min_deposit() == 0
     assert pool.total_deployed() == 0
-    assert pool.asset() == base_asset.address
+    assert pool.ASSET() == base_asset.address
     # ensure ownership and revenue is initialized properly
     assert pool.owner() == admin
     assert pool.pending_owner() == ZERO_ADDRESS
