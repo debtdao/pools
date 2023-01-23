@@ -434,7 +434,7 @@ def accept_owner() -> bool:
 	new_owner: address = self.pending_owner
 	assert msg.sender == new_owner, "not pending owner"
 	self.owner = new_owner
-	log UpdateOwner(new_owner)
+	log AcceptOwner(new_owner)
 	return True
 
 # THS IS COOL^
@@ -457,54 +457,54 @@ def set_max_assets(new_max: uint256)  -> bool:
 ### Manage Pool Fees
 
 @internal
-def _assert_max_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
+def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES) -> bool:
   assert msg.sender == self.owner, "not owner"
-  assert fee <= FEE_COEFFICIENT, "bad performance fee" # max 100% performance fee
-  log UpdateFee(fee, fee_type)
+  assert _fee <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
+  log FeeSet(_fee, _fee_type)
   return True
 
 @external
 @nonreentrant("lock")
-def set_performance_fee(fee: uint16) -> bool:
-  self.fees.performance = fee
-  return self._assert_max_fee(fee, FEE_TYPES.PERFORMANCE)
+def set_performance_fee(_fee: uint16) -> bool:
+  self.fees.performance = _fee
+  return self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
 
 @internal
-def _assert_pittance_fee(fee: uint16, fee_type: FEE_TYPES) -> bool:
+def _assert_pittance_fee(_fee: uint16, fee_type: FEE_TYPES) -> bool:
 	assert msg.sender == self.owner, "not owner"
-	assert fee <= MAX_PITTANCE_FEE, "bad pittance fee"
-	log UpdateFee(fee, fee_type)
+	assert _fee <= MAX_PITTANCE_FEE, "bad pittance fee"
+	log FeeSet(_fee, fee_type)
 	return True
 
 @external
 @nonreentrant("lock")
-def set_flash_fee(fee: uint16) -> bool:
-	self.fees.flash = fee
-	return self._assert_pittance_fee(fee, FEE_TYPES.FLASH)
+def set_flash_fee(_fee: uint16) -> bool:
+	self.fees.flash = _fee
+	return self._assert_pittance_fee(_fee, FEE_TYPES.FLASH)
 
 @external
 @nonreentrant("lock")
-def set_collector_fee(fee: uint16) -> bool:
-	self.fees.collector = fee
-	return self._assert_pittance_fee(fee, FEE_TYPES.COLLECTOR)
+def set_collector_fee(_fee: uint16) -> bool:
+	self.fees.collector = _fee
+	return self._assert_pittance_fee(_fee, FEE_TYPES.COLLECTOR)
 
 @external
 @nonreentrant("lock")
-def set_deposit_fee(fee: uint16) -> bool:
-	self.fees.collector = fee
-	return self._assert_pittance_fee(fee, FEE_TYPES.DEPOSIT)
+def set_deposit_fee(_fee: uint16) -> bool:
+	self.fees.deposit = _fee
+	return self._assert_pittance_fee(_fee, FEE_TYPES.DEPOSIT)
 
 @external
 @nonreentrant("lock")
-def set_withdraw_fee(fee: uint16) -> bool:
-	self.fees.collector = fee
-	return self._assert_pittance_fee(fee, FEE_TYPES.WITHDRAW)
+def set_withdraw_fee(_fee: uint16) -> bool:
+	self.fees.withdraw = _fee
+	return self._assert_pittance_fee(_fee, FEE_TYPES.WITHDRAW)
 
 @external
-def set_rev_recipient(new_recipient: address) -> bool:
+def set_rev_recipient(_new_recipient: address) -> bool:
   assert msg.sender == self.rev_recipient, "not rev_recipient"
-  self.pending_rev_recipient = new_recipient
-  log NewPendingRevRecipient(new_recipient)
+  self.pending_rev_recipient = _new_recipient
+  log NewPendingRevRecipient(_new_recipient)
   return True
 
 @external
@@ -515,6 +515,7 @@ def accept_rev_recipient() -> bool:
   return True
 
 @external
+@view
 @nonreentrant("lock")
 def claimable_rev(_token: address) -> uint256:
 	if _token != self:
@@ -529,7 +530,8 @@ def claim_rev(_token: address, _amount: uint256) -> bool:
 	@param _token - token earned as fees to claim. NOTE: not used because `self` is hardcoded
 	@param _amount - amount of _token rev_recipient wants to claim
 	"""
-	assert msg.sender == self.rev_recipient
+	assert _token == self, "non-revenue token"
+	assert msg.sender == self.rev_recipient, "not rev_recipient"
 	
 	claimed: uint256 = _amount
 	if _amount == max_value(uint256):
@@ -1784,12 +1786,12 @@ interface ISecuredLine:
 event Transfer:
 	sender: indexed(address)
 	receiver: indexed(address)
-	value: uint256
+	amount: indexed(uint256)
 
 event Approval:
 	owner: indexed(address)
 	spender: indexed(address)
-	value: uint256
+	amount: indexed(uint256)
 
 # IERC4626 Events
 event Deposit:
@@ -1840,7 +1842,7 @@ event DivestVault:
 
 # fees
 
-event UpdateFee:
+event FeeSet:
 	fee_bps: indexed(uint16)
 	fee_type: indexed(FEE_TYPES)
 
@@ -1855,19 +1857,19 @@ event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	token: indexed(address) # where fees are being paid from
 	revenue: indexed(uint256) # total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
 	amount: uint256			# tokens paid in fees, denominated in 
-	fee_type: FEE_TYPES 		# maps to app specific fee enum or eventually some standard fee code system
+	fee_type: FEE_TYPES		# maps to app specific fee enum or eventually some standard fee code system
 	receiver: address 		# who is getting the fees paid
 
 event RevenueClaimed:
-	recipient: indexed(address)
-	fees: indexed(uint256)
+	rev_recipient: indexed(address)
+	amount: indexed(uint256)
 
 # Admin updates
 
 event NewPendingOwner:
 	new_recipient: indexed(address)
 
-event UpdateOwner:
+event AcceptOwner:
 	new_recipient: indexed(address) # New active governance
 
 event UpdateMinDeposit:

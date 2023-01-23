@@ -2,6 +2,7 @@ import boa
 import ape
 import pytest
 import logging
+from eth_utils import to_checksum_address
 from datetime import timedelta
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -59,8 +60,6 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
     (sender, receiver) = (me, admin) if is_send else (admin, me)
 
     for token in all_erc20_tokens:
-        logging.debug("ERC20:TRANSFER:", token.address)
-
         pre_sender_balance =  token.balanceOf(sender)
         pre_receiver_balance =  token.balanceOf(receiver)
 
@@ -70,11 +69,10 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
             # validate that Transfer Log is correct
             # TODO figure out how to test logs in boa        # https://docs.apeworx.io/ape/stable/methoddocs/api.html?highlight=decode#ape.api.networks.EcosystemAPI.decode_logs
             # TODO found out. its contract.get_logs(). i assume 0 is first, -1 is last emitted
-            # logs0 = list(tx0.decode_logs(token.Transfer))
-            # assert len(logs0) == 1
-            # assert logs0[0].sender == sender
-            # assert logs0[0].receiver == receiver
-            # assert logs0[0].amount == amount
+            event = token.get_logs()[0]
+            assert to_checksum_address(event.args_map['sender']) == sender
+            assert to_checksum_address(event.args_map['receiver']) == receiver
+            assert event.args_map['amount'] == str(amount)
             
             post_sender_balance = token.balanceOf(sender)
             post_receiver_balance = token.balanceOf(receiver)
@@ -85,11 +83,10 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
             tx1 = token.transfer(receiver, 0, sender=sender)
 
             # TODO figure out how to test logs in boa
-            # logs1 = list(tx0.decode_logs(token.Transfer))
-            # assert len(logs1) == 1
-            # assert logs1[0].sender == sender
-            # assert logs1[0].receiver == receiver
-            # assert logs1[0].amount == 0
+            event = token.get_logs()[0]
+            assert to_checksum_address(event.args_map['sender']) == sender
+            assert to_checksum_address(event.args_map['receiver']) == receiver
+            assert event.args_map['amount'] == '0'
 
             with boa.reverts():  # TODO expect revert msg
                 # Expected insufficient funds failure
@@ -108,8 +105,6 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
     (sender, receiver) = (me, admin) if is_send else (admin, me)
 
     for token in all_erc20_tokens:
-        logging.debug("ERC20:TRANSFER_FROM:", token.address)
-
         pre_sender_balance = token.balanceOf(sender)
         pre_receiver_balance = token.balanceOf(receiver)
 
@@ -121,14 +116,14 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
         tx = token.approve(receiver, amount, sender=sender)
 
         # TODO figure out how to test logs in boa
-        # logs = list(tx.decode_logs(token.Approval))
-        # assert len(logs) == 1
-        # assert logs[0].sender == sender
-        # assert logs[0].receiver == receiver
-        # assert logs[0].amount == amount
+        event = token.get_logs()[0]
+
+        assert to_checksum_address(event.args_map['owner']) == sender
+        assert to_checksum_address(event.args_map['spender']) == receiver
+        assert event.args_map['amount'] == str(amount)
 
         approved = token.allowance(sender, receiver)
-        assert approved == amount 
+        assert approved == amount
 
         # logging.debug("approved transferFrom amount", approved, amount)
 
@@ -136,11 +131,10 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
         tx = token.transferFrom(sender, receiver, amount, sender=receiver)
 
         # # TODO figure out how to test logs in boa
-        # # logs = list(tx.decode_logs(token.Transfer))
-        # # assert len(logs) == 1
-        # # assert logs[0].sender == admin
-        # # assert logs[0].receiver == receiver
-        # # assert logs[0].amount == 200
+        event = token.get_logs()[0]
+        assert to_checksum_address(event.args_map['sender']) == admin
+        assert to_checksum_address(event.args_map['receiver']) == receiver
+        assert event.args_map['amount'] == str(amount)
 
         assert token.allowance(sender, receiver) == 0
         assert token.balanceOf(sender) == pre_sender_balance - amount
@@ -152,39 +146,37 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
         
         # receiver should be able to transferFrom themselves to themselves
         token.transferFrom(receiver, receiver, amount, sender=receiver)
+
+        event = token.get_logs()[0] # test events before balanceOf calls
+        assert to_checksum_address(event.args_map['sender']) == admin
+        assert to_checksum_address(event.args_map['receiver']) == receiver
+        assert event.args_map['amount'] == str(amount)
+
         # both have same balance has before
         assert token.balanceOf(sender) == pre_sender_balance - amount
         assert token.balanceOf(receiver) == pre_receiver_balance + amount
-        # # TODO figure out how to test logs in boa
-        # # logs = list(tx.decode_logs(token.Transfer))
-        # # assert len(logs) == 1
-        # # assert logs[0].sender == admin
-        # # assert logs[0].receiver == receiver
-        # # assert logs[0].amount == 200
 
         # receiver should be able to transferFrom themselves even tho its gas inefficient
         token.transferFrom(receiver, sender, pre_receiver_balance + amount, sender=receiver)
+        
+        event = token.get_logs()[0] # test events before balanceOf calls
+        assert to_checksum_address(event.args_map['sender']) == admin
+        assert to_checksum_address(event.args_map['receiver']) == receiver
+        assert event.args_map['amount'] == str(amount)
 
         assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
         assert token.balanceOf(receiver) == 0
-        # # TODO figure out how to test logs in boa
-        # # logs = list(tx.decode_logs(token.Transfer))
-        # # assert len(logs) == 1
-        # # assert logs[0].sender == admin
-        # # assert logs[0].receiver == receiver
-        # # assert logs[0].amount == 200
 
         # sender should be able to send 0 if they have 0 balance
         token.transferFrom(receiver, sender, 0, sender=receiver)
+
+        event = token.get_logs()[0] # test events before balanceOf calls
+        assert to_checksum_address(event.args_map['sender']) == admin
+        assert to_checksum_address(event.args_map['receiver']) == receiver
+        assert event.args_map['amount'] == str(amount)
         # both have same balance has before
         assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
         assert token.balanceOf(receiver) == 0
-        # # TODO figure out how to test logs in boa
-        # # logs = list(tx.decode_logs(token.Transfer))
-        # # assert len(logs) == 1
-        # # assert logs[0].sender == admin
-        # # assert logs[0].receiver == receiver
-        # # assert logs[0].amount == 200
 
 @given(amount=st.integers(min_value=1, max_value=10**50),
         is_send=st.integers(min_value=0, max_value=1))
@@ -197,39 +189,52 @@ def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_se
     (sender, receiver) = (me, admin) if is_send else (admin, me)
 
     for token in all_erc20_tokens:
-        tx = token.approve(sender, amount, sender=receiver)
+        tx = token.approve(receiver, amount, sender=sender)
 
-        # logs = list(tx.decode_logs(token.Approval))
-        # assert len(logs) == 1
-        # assert logs[0].receiver == receiver
-        # assert logs[0].sender == sender
-        # assert logs[0].amount == amount
+        event = token.get_logs()[0]
+        assert to_checksum_address(event.args_map['spender']) == receiver
+        assert to_checksum_address(event.args_map['owner']) == sender
+        assert event.args_map['amount'] == str(amount)
 
-        assert token.allowance(receiver, sender) == amount
+        assert token.allowance(sender, receiver) == amount
 
         # Set auth balance to 0 and check attacks vectors
         # though the contract itself shouldn’t enforce it,
         # to allow backwards compatibility
-        tx = token.approve(sender, 0, sender=receiver)
+        tx = token.approve(receiver, 0, sender=sender)
 
-        # logs = list(tx.decode_logs(token.Approval))
-        # assert len(logs) == 1
-        # assert logs[0].receiver == receiver
-        # assert logs[0].sender == sender
-        # assert logs[0].amount == 0
+        event = token.get_logs()[0]
+        assert to_checksum_address(event.args_map['spender']) == receiver
+        assert to_checksum_address(event.args_map['owner']) == sender
+        assert event.args_map['amount'] == '0'
+    
+        assert token.allowance(sender, receiver) == 0
 
-        assert token.allowance(admin, sender) == 0
+        # check increase math from 0
+        tx = token.increaseAllowance(receiver, amount, sender=sender)
 
+        event = token.get_logs()[0]
+        assert to_checksum_address(event.args_map['spender']) == receiver
+        assert to_checksum_address(event.args_map['owner']) == sender
+        assert event.args_map['amount'] == str(amount)
 
-        tx = token.increaseAllowance(sender, amount, sender=receiver)
+        assert token.allowance(sender, receiver) == amount
 
-        # logs = list(tx.decode_logs(token.Approval))
-        # assert len(logs) == 1
-        # assert logs[0].receiver == receiver
-        # assert logs[0].sender == sender
-        # assert logs[0].amount == 0
+        # check increase math from non-0
+        tx = token.increaseAllowance(receiver, amount, sender=sender)
 
-        assert token.allowance(receiver, sender) == amount
+        event = token.get_logs()[0]
+        assert to_checksum_address(event.args_map['spender']) == receiver
+        assert to_checksum_address(event.args_map['owner']) == sender
+        assert event.args_map['amount'] == str(amount * 2) # emits total allowance, not increase
+
+        assert token.allowance(sender, receiver) == amount * 2
+        
+        # test rando doesnt have approvals
+        assert token.allowance(sender, boa.env.generate_address()) == 0
+        # spender shouldnt have approved person who is approving them
+        assert token.allowance(receiver, sender) == 0
+
 
 
 @given(amount=st.integers(min_value=1, max_value=10**50))
@@ -281,4 +286,4 @@ def test_permit(all_erc20_tokens, init_token_balances, chain, accounts, amount):
 
         # token.permit(admin, me, amount, deadline, signature, sender=me)
 
-        # assert token.allowance(admin, me) == amount
+        # assert token.allowance(admin, me) == str(amount)

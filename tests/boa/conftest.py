@@ -54,18 +54,18 @@ def init_token_balances(base_asset, bond_token, pool, admin, me):
     # TODO dont be an idiot and use boa.eval instead of contract calls
 
     # mock token
-    base_asset._mint_for_testing(me, mint_amount)
-    base_asset._mint_for_testing(admin, mint_amount)
+    base_asset.mint(me, mint_amount)
+    base_asset.mint(admin, mint_amount)
 
     bond_token.mint(me, mint_amount, sender=admin)
     bond_token.mint(admin, mint_amount, sender=admin)
 
     # mint lending tokens then deposit into pool to get
-    base_asset._mint_for_testing(me, mint_amount, sender=me)
+    base_asset.mint(me, mint_amount, sender=me)
     base_asset.approve(pool, mint_amount, sender=me)
     shares = pool.deposit(mint_amount, me, sender=me)
         
-    base_asset._mint_for_testing(admin, mint_amount, sender=admin)
+    base_asset.mint(admin, mint_amount, sender=admin)
     base_asset.approve(pool, mint_amount, sender=admin)
     shares2 = pool.deposit(mint_amount, admin, sender=admin)
 

@@ -9,8 +9,22 @@ def borrower():
     return boa.env.generate_address()
 
 @pytest.fixture(scope="session")
-def roles():
+def pool_roles():
     return ['owner', 'rev_recipient']
+
+@pytest.fixture(scope="session")
+def pool_fee_types():
+    return [
+    	# NOTE: MUST be same order as Fees enum
+        'performance',
+        'deposit',
+        'withdraw',
+        'flash',
+        'collector',
+        'referral',
+        'snitch',
+    ]
+
 
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):

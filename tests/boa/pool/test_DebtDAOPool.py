@@ -1,6 +1,8 @@
 import boa
-import boa
 import ape
+import math
+import pytest
+from eth_utils import to_checksum_address
 from boa.vyper.contract import BoaError
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -9,10 +11,12 @@ from datetime import timedelta
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
+MAX_PITANCE_FEE = 200 # 2% in bps
+FEE_COEFFICIENT = 10000 # 100% in bps
 
 
 # TODO Ask ChatGPT to generate test cases in vyper
-
 # 1. delegate priviliges on investment functions
 # 1. vault_investment goes up by _amount 
 # 1. only vault that gets deposited into has vault_investment changed
@@ -81,3 +85,68 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
     assert pool.totalSupply() == 0
     assert pool.total_assets()== 0
 
+
+
+@pytest.mark.pool
+@pytest.mark.rev_generator
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT),
+        pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE)) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_emit_revenue_generated_event(pool, pool_fee_types, admin, me, base_asset, pittance_fee, amount):
+    fee_types =  [(idx, fee, pittance_fee) for idx, fee in enumerate(pool_fee_types)][1:] # remove performance fees from test
+    for fee_type in fee_types:
+        fee_enum_idx = fee_type[0] + 1 # offset for removed performance fee
+        fee_name = fee_type[1]
+        set_fee = getattr(pool, f'set_{fee_name}_fee', lambda x: "Fee type does not exist in Pool.vy")
+
+        set_fee(pittance_fee, sender=admin)
+        event = pool.get_logs()[0]
+        assert f'{event.event_type}' == f'event FeeSet(uint16,FEE_TYPES)'
+        print("set fees", event.args_map['fee_bps'], event.args_map['fee_type'], pool.fees(), f'set_{fee_name}_fee')
+        assert event.args_map['fee_bps'] == str(pittance_fee)
+        assert event.args_map['fee_type'] == str(fee_enum_idx)
+        assert pool.fees()[-fee_enum_idx] == pittance_fee
+
+        base_asset.mint(me, amount)
+        base_asset.approve(pool, amount, sender=me)
+        assert base_asset.balanceOf(me)
+
+        expected_rev = math.floor(((amount * pittance_fee) / FEE_COEFFICIENT))
+        shares = pool.deposit(amount, me, sender=me) # TODO need to map function to fee type
+        # event = pool.get_logs()[0]
+        # assert f'{event.event_type}' == 'event RevenueGenerated(address,address,uint256,uint256,FEE_TYPES,address)'
+        # assert event.args_map['amount'] == amount
+        # assert event.args_map['revenue'] == expected_rev
+        # assert event.args_map['fee_type'] == fee_type
+        # assert to_checksum_address(event.args_map['payer']) == me # TODO change based on type
+        # assert to_checksum_address(event.args_map['token']) == base_asset # TODO change based on type
+        # assert to_checksum_address(event.args_map['receiver']) == admin# TODO change based on type
+        assert pool.accrued_fees() == expected_rev
+
+
+@pytest.mark.pool
+@pytest.mark.rev_generator
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT),
+        pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE)) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_cant_set_pittance_fee_over_200_bps(pool, pool_fee_types, admin, me, base_asset, pittance_fee, amount):
+    pittance_types = pool_fee_types[1:] # remove performance fees from test
+    for fee_type in pittance_types:
+        set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
+        with boa.reverts():
+            set_fee(MAX_PITANCE_FEE + 1, sender=admin)
+
+@pytest.mark.pool
+@pytest.mark.rev_generator
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT),
+        pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE)) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_cant_set_performance_fee_over_10000_bps(pool, pool_fee_types, admin, me, base_asset, pittance_fee, amount):
+    with boa.reverts():
+        pool.set_performance_fee(MAX_PITANCE_FEE + 1, sender=admin)
+
+    # deposit, withdraw, flash should all be easy
+    
+    # print("generate rev event", response)
+
+    # SNITCH cant have 0 amount rev

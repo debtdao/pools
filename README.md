@@ -39,7 +39,7 @@ $ >>>>> pool.decimals()
 
 # start using your contracts
 $ >>>>> mint_amount = 100
-$ >>>>> asset._mint_for_testing(admin, mint_amount, sender=admin)
+$ >>>>> asset.mint(admin, mint_amount, sender=admin)
 $ >>>>> asset.approve(pool, mint_amount, sender=admin)
 $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
 ```
@@ -72,7 +72,7 @@ $ >>>>> pool = boa.load('contracts/DebtDAOPool.vy', admin, asset, 'Dev Testing',
 
 $ >>>>> asset = boa.load('tests/mocks/MockERC20.vy', 'An Asset To Lend', 'LEND', 18)
 
-$ >>>>> asset._mint_for_testing(admin, mint_amount, sender=admin)
+$ >>>>> asset.mint(admin, mint_amount, sender=admin)
 $ >>>>> asset.approve(pool, mint_amount, sender=admin)
 $ >>>>> pool.deposit(mint_amount, admin, sender=admin)
 $ >>>>> boa.env.time_travel(seconds=1000)

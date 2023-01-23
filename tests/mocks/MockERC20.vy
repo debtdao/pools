@@ -8,14 +8,14 @@ from vyper.interfaces import ERC20 as IERC20
 implements: IERC20
 
 event Transfer:
-    _from: indexed(address)
-    _to: indexed(address)
-    _value: uint256
+	sender: indexed(address)
+	receiver: indexed(address)
+	amount: indexed(uint256)
 
 event Approval:
-    _owner: indexed(address)
-    _spender: indexed(address)
-    _value: uint256
+	owner: indexed(address)
+	spender: indexed(address)
+	amount: indexed(uint256)
 
 name: public(String[64])
 symbol: public(String[32])
@@ -82,7 +82,7 @@ def approve(_spender : address, _value : uint256) -> bool:
 
 
 @external
-def _mint_for_testing(_target: address, _value: uint256) -> bool:
+def mint(_target: address, _value: uint256) -> bool:
     self.total_supply += _value
     return self._transfer(empty(address), _target, _value)
 

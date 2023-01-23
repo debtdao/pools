@@ -6,7 +6,7 @@ import "forge-std/Test.sol";
 import {VyperDeployer} from "./utils/VyperDeployer.sol";
 
 interface IBondToken {
-    function _mint_for_testing(address _target, uint256 _value)
+    function mint(address _target, uint256 _value)
         external
         returns (bool);
 
@@ -46,7 +46,7 @@ contract SimpleVyperTest is Test {
         console.log(name);
         emit log_string(name);
         vm.startPrank(debtdao);
-        iToken._mint_for_testing(recipient, 100 ether);
+        iToken.mint(recipient, 100 ether);
         assertEq(iToken.balanceOf(recipient), 100 ether);
     }
 }
