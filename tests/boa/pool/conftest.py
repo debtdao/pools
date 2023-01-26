@@ -22,9 +22,12 @@ def pool_fee_types():
         'flash',
         'collector',
         'referral',
-        'snitch',
+        # 'snitch', unique constant fee, we test separately
     ]
 
+@pytest.fixture(scope="session")
+def pittance_fee_types(pool_fee_types):
+    return pool_fee_types[1:] # cut performance and snitch fees of ends
 
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):

@@ -10,8 +10,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
+from ..utils.events import _find_event
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+MAX_TOKEN_AMOUNT = MAX_UINT - 10**25 # offset by existing admin balance so no overflows
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 
@@ -31,7 +33,7 @@ ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev
 # (done) 1. rev_recipient can claim_rev
 # (done) 1. non rev_recipient cant claim_rev
 # (done) 1. self.owner cant claim_rev
-# (in pool impl tests) 4. MUST emit RevenueGenerated event even if event.revenue == 0
+# (done in pool impl tests) 4. MUST emit RevenueGenerated event even if event.revenue == 0
 # 2. (invariant) all self.owner rev is claimable by self.rev_recipient
 # 3. (invariant) claimable rev == sum of self.owner fees events emitted
 # 5. (invariant) max_uint claim_rev is claimable_rev
@@ -222,6 +224,7 @@ def test_cant_accept_null_role(pool, me, admin, pool_roles):
 def test_rev_recipient_can_claim_rev(pool, admin, amount):
     assert pool.rev_recipient() == admin
     assert pool.claimable_rev(pool) == 0
+    assert pool.balanceOf(admin) == 0
 
     # give revenue to delegate
     pool.eval(f'self.accrued_fees = {amount}')
@@ -235,7 +238,7 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(0)
+    assert event.args_map['amount'] == 0
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
     # running README boa init in repl and calling this works so issue with test setup
@@ -244,7 +247,7 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(1)
+    assert event.args_map['amount'] == 1
     assert pool.claimable_rev(pool) == amount - 1
     assert pool.accrued_fees() == amount - 1
 
@@ -253,13 +256,15 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(amount - 1)
+    assert event.args_map['amount'] == amount - 1
     assert pool.claimable_rev(pool) == 0
     assert pool.accrued_fees() == 0
 
     # test max claim shortcut
+    # reset all values so no overflow
     pool.eval(f'self.accrued_fees = {amount}')
     pool.eval(f'self.balances[self] = {amount}')
+    pool.eval(f'self.balances[self.owner] = 0')
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
 
@@ -267,7 +272,7 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(amount)
+    assert event.args_map['amount'] == amount
     assert pool.claimable_rev(pool) == 0
 
 
@@ -293,12 +298,12 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(amount)
+    assert event.args_map['amount'] == amount
     assert pool.claimable_rev(pool) == 0
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
-@given(amount=st.integers(min_value=1, max_value=MAX_UINT - 1))
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT - 2)) # ensure we dont hit MAX_UINT special case
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
     # test max claim shortcut
@@ -307,7 +312,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
 
-    with boa.reverts():
+    with boa.reverts(): # # TODO doesnot revert
         pool.claim_rev(pool, amount + 1, sender=admin)
     
     assert pool.claimable_rev(pool) == amount
@@ -318,7 +323,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
     event = pool.get_logs()[ClaimRevenueEventLogIndex]
     assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
     assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == str(amount)
+    assert event.args_map['amount'] == amount
     assert pool.claimable_rev(pool) == 0
 
 
@@ -422,9 +427,9 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, bond_toke
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount, sender=boa.env.generate_address())
     # cant claim over available amount
-    with boa.reverts("not rev_recipient"):
+    with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount + 1, sender=me)
-    with boa.reverts("not rev_recipient"):
+    with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount + 1, sender=boa.env.generate_address())
 
 
@@ -432,6 +437,8 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, bond_toke
 @pytest.mark.pool
 @pytest.mark.rev_generator
 @pytest.mark.event_emissions
+@given(amount=st.integers(min_value=0, max_value=MAX_UINT - 1)) # prevent overflow but allow testing MAX_UINT path
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amount):
     # TODO
     try:
@@ -441,7 +448,7 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
         assert f'{event.event_type}' == 'event RevenueGenerated(address,address,uint256,uint256,uint256,address)'
     finally:
         # if revert then do nothing. function not implemented, allowed in EIP spec
-        return
+        assert True
 
 # Unrelated to our contract. debugging boa functionality
 # def test_assertion_state_change(pool, me, admin, pool_roles):

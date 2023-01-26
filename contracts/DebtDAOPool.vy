@@ -12,7 +12,8 @@ TODO -
 6. implement _get_share_APR()
 10. Add performance fee to 4626 profits?
 5. understand how DEGREDATION_COEFFICIENT works
-11. add sepearet var from total_assets called total_debt and use that instead. Prevents lvg from fucking up share price. can incorporatedebt into share price if we want
+11. add separate var from total_assets called total_debt and use that instead.
+	Prevents lvg from fucking up share price. can incorporate debt into share price if we want
 8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
 1. Refactor yearn permit()  so args are exactly 2612 standard
 2. Add permit + permit2 IERC4626P extension and implement functions
@@ -64,6 +65,7 @@ interface IDebtDAOPool:
 	def set_performance_fee(fee: uint16) -> bool: nonpayable
 	def set_collector_fee(fee: uint16) -> bool: nonpayable
 	def set_withdraw_fee(fee: uint16) -> bool: nonpayable
+	def set_referral_fee(fee: uint16) -> bool: nonpayable
 	def set_deposit_fee(fee: uint16) -> bool: nonpayable
 	def set_flash_fee(fee: uint16) -> bool: nonpayable
 
@@ -201,11 +203,11 @@ def __init__(
 
 	self.owner = msg.sender # set owner to deployer for validation functions
 	self._assert_max_fee(_fees.performance, FEE_TYPES.PERFORMANCE) # max 100% performance fee
-	self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
-	self._assert_pittance_fee(_fees.flash, FEE_TYPES.FLASH)
-	self._assert_pittance_fee(_fees.referral, FEE_TYPES.REFERRAL)
 	self._assert_pittance_fee(_fees.deposit, FEE_TYPES.DEPOSIT)
 	self._assert_pittance_fee(_fees.withdraw, FEE_TYPES.WITHDRAW)
+	self._assert_pittance_fee(_fees.flash, FEE_TYPES.FLASH)
+	self._assert_pittance_fee(_fees.collector, FEE_TYPES.COLLECTOR)
+	self._assert_pittance_fee(_fees.referral, FEE_TYPES.REFERRAL)
 
 	# Setup Pool variables
 	self.fees = _fees
@@ -460,7 +462,7 @@ def set_max_assets(new_max: uint256)  -> bool:
 def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES) -> bool:
   assert msg.sender == self.owner, "not owner"
   assert _fee <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
-  log FeeSet(_fee, _fee_type)
+  log FeeSet(_fee, convert(_fee_type, uint256))
   return True
 
 @external
@@ -470,35 +472,45 @@ def set_performance_fee(_fee: uint16) -> bool:
   return self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
 
 @internal
-def _assert_pittance_fee(_fee: uint16, fee_type: FEE_TYPES) -> bool:
+def _assert_pittance_fee(_fee: uint16, fee_type: FEE_TYPES):
 	assert msg.sender == self.owner, "not owner"
 	assert _fee <= MAX_PITTANCE_FEE, "bad pittance fee"
-	log FeeSet(_fee, fee_type)
-	return True
+	log FeeSet(_fee, convert(fee_type, uint256))
 
 @external
 @nonreentrant("lock")
 def set_flash_fee(_fee: uint16) -> bool:
+	self._assert_pittance_fee(_fee, FEE_TYPES.FLASH)
 	self.fees.flash = _fee
-	return self._assert_pittance_fee(_fee, FEE_TYPES.FLASH)
+	return True
 
 @external
 @nonreentrant("lock")
 def set_collector_fee(_fee: uint16) -> bool:
+	self._assert_pittance_fee(_fee, FEE_TYPES.COLLECTOR)
 	self.fees.collector = _fee
-	return self._assert_pittance_fee(_fee, FEE_TYPES.COLLECTOR)
+	return True
 
 @external
 @nonreentrant("lock")
 def set_deposit_fee(_fee: uint16) -> bool:
+	self._assert_pittance_fee(_fee, FEE_TYPES.DEPOSIT)
 	self.fees.deposit = _fee
-	return self._assert_pittance_fee(_fee, FEE_TYPES.DEPOSIT)
+	return True
 
 @external
 @nonreentrant("lock")
 def set_withdraw_fee(_fee: uint16) -> bool:
+	self._assert_pittance_fee(_fee, FEE_TYPES.WITHDRAW)
 	self.fees.withdraw = _fee
-	return self._assert_pittance_fee(_fee, FEE_TYPES.WITHDRAW)
+	return True
+
+@external
+@nonreentrant("lock")
+def set_referral_fee(_fee: uint16) -> bool:
+	self._assert_pittance_fee(_fee, FEE_TYPES.REFERRAL)
+	self.fees.referral = _fee
+	return True
 
 @external
 def set_rev_recipient(_new_recipient: address) -> bool:
@@ -532,14 +544,15 @@ def claim_rev(_token: address, _amount: uint256) -> bool:
 	"""
 	assert _token == self, "non-revenue token"
 	assert msg.sender == self.rev_recipient, "not rev_recipient"
+
 	
 	claimed: uint256 = _amount
 	if _amount == max_value(uint256):
 		claimed = self.accrued_fees # set to max available
 	
 	# transfer fee shares locked in pool to fee recipient
-	self.accrued_fees -= claimed
-	# manually approve bc we can never be msg.sender internally
+	self.accrued_fees -= claimed # reverts on underflow
+	# manually approve bc we can never be msg.sender in internal _transfer
 	self._approve(self, msg.sender, claimed)
 	self._transfer(self, msg.sender, claimed)
 
@@ -563,6 +576,8 @@ def set_profit_degredation(_vesting_rate: uint256):
 	assert _vesting_rate <= DEGRADATION_COEFFICIENT
 	self.vesting_rate = _vesting_rate
 	log UpdateProfitDegredation(_vesting_rate) 
+
+
 
 ###################################
 ###################################
@@ -613,23 +628,13 @@ def repay_debt(_line: address, _amount: uint256):
 	TODO should we more tightly integrate LoC in? I like having it loosely coupled, makes it kinda automagic
 		 also adds security risk but less than giving full control of ur asset to Delegate
 	"""	
+	assert msg.sender == self.owner
 	assert self == ISecuredLine(_line).borrower()
-	assert LINE_STATUS.REPAID != ISecuredLine(_line).status()
-	
-	# TODO add conditional on line status. if DEFAUL or INSOLVENT then earn snitch fee
-	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
-	# assert msg.sender == self.owner
+	assert LINE_STATUS.ACTIVE == ISecuredLine(_line).status()
 
-	# checkpoint our balance to make sure we only pay what we expected
-	# TODO balance check necessary on repayment if we are borrower and can only borrower asset? Assumes trust in the contract
-	pre_balance: uint256 = IERC20(ASSET).balanceOf(self)
-	
 	IERC20(ASSET).approve(_line, _amount)
 	assert ISecuredLine(_line).depositAndRepay(_amount)
 
-	post_balance: uint256 = IERC20(ASSET).balanceOf(self)
-	
-	assert pre_balance - _amount == post_balance
 	self.total_assets -= _amount
 	# TODO TEST is this the only accounting we need to do? how do we know this isnt conflicting with self.total_assets?
 	self.debt_principal -= _amount
@@ -641,6 +646,7 @@ def emergency_repay(_line: address, _amount: uint256):
 	assert self == ISecuredLine(_line).borrower()
 	status: LINE_STATUS = ISecuredLine(_line).status()
 	assert LINE_STATUS.LIQUIDATABLE == status or LINE_STATUS.INSOLVENT == status
+	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
 	assert _amount <= self._get_max_liquid_assets()
 	# force debt repayment and payout snitch fee if applicable
 	# normally we dont comingle depositor vs debt assets but in the case of default lenders get priority over depositors
@@ -854,7 +860,7 @@ def _calc_and_mint_fee(
 	fees: uint256 = self._calc_fee(shares, fee)
 	if(fees != 0):
 		if(to == self.owner):
-			# store delegate fees separetly from delegate balance so we can slash if neccessary
+			# store delegate fees separately from delegate balance so we can slash if neccessary
 			assert self._mint(self, fees, fees * self._get_share_price())
 			self.accrued_fees += fees
 		else:
@@ -862,8 +868,8 @@ def _calc_and_mint_fee(
 			assert self._mint(to, fees, fees * self._get_share_price())
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
-	log RevenueGenerated(payer, self, fees, shares, fee_type, to)
-		
+	log RevenueGenerated(payer, self, fees, shares, convert(fee_type, uint256), to)
+
 	return fees
 
 
@@ -1002,7 +1008,7 @@ def _take_performance_fee(interest_earned: uint256) -> uint256:
 		collector_assets: uint256 = collector_fee * share_price
 		self.total_assets -= collector_assets
 		self._erc20_safe_transfer(ASSET, msg.sender, collector_assets)
-		log RevenueGenerated(self, ASSET, collector_assets, interest_earned, FEE_TYPES.COLLECTOR, msg.sender)
+		log RevenueGenerated(self, ASSET, collector_assets, interest_earned, convert(FEE_TYPES.COLLECTOR, uint256), msg.sender)
 
 	return performance_fee + collector_fee
 
@@ -1023,10 +1029,10 @@ def _deposit(
 	share_price: uint256 = self._get_share_price()
 	shares: uint256 = _assets / share_price
 
-	if self.fees.deposit != 0:
-		self._calc_and_mint_fee(_receiver, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
-
-	if _referrer != empty(address) and self.fees.referral != 0:
+	# call even if fees = 0 to log revenue for prod analytics
+	self._calc_and_mint_fee(_receiver, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
+	# call even if fees = 0 to log revenue for prod analytics
+	if _referrer != empty(address):
 		self._calc_and_mint_fee(_receiver, _referrer, shares, self.fees.referral, FEE_TYPES.REFERRAL)
 
 	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
@@ -1063,7 +1069,7 @@ def _withdraw(
 	# make them burn extra shares instead of inflating total supply.
 	# use _calc not _mint_and_calc. 
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
-	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  FEE_TYPES.WITHDRAW, self) # log potential fees for product analytics
+	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  convert(FEE_TYPES.WITHDRAW, uint256), self) # log potential fees for product analytics
 
 	#  remove _assets/shares from pool
 	self._burn(_receiver, shares + withdraw_fee, _assets)
@@ -1321,7 +1327,7 @@ def flashLoan(
 	self._erc20_safe_transfer(ASSET, msg.sender, amount)
 
 	fee: uint256 = self._get_flash_fee(_token, amount)
-	log RevenueGenerated(msg.sender, ASSET, fee, amount, FEE_TYPES.FLASH, self)
+	log RevenueGenerated(msg.sender, ASSET, fee, amount, convert(FEE_TYPES.FLASH, uint256), self)
 
 	# ensure they can receive flash loan and are ERC3156 compatible
 	assert IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender, _token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan")
@@ -1786,22 +1792,22 @@ interface ISecuredLine:
 event Transfer:
 	sender: indexed(address)
 	receiver: indexed(address)
-	amount: indexed(uint256)
+	amount: uint256
 
 event Approval:
 	owner: indexed(address)
 	spender: indexed(address)
-	amount: indexed(uint256)
+	amount: uint256
 
 # IERC4626 Events
 event Deposit:
-	shares: indexed(uint256)
+	shares: uint256
 	owner: indexed(address)
-	sender: address
+	sender: indexed(address)
 	assets: uint256
 
 event Withdraw:
-	shares: indexed(uint256)
+	shares: uint256
 	owner: indexed(address)
 	receiver: indexed(address)
 	sender: address
@@ -1814,55 +1820,55 @@ event TrackSharePrice:
 	trans_change: int256 	# transitory change in share price denominated in APR bps. + for good boi, - for bad gurl
 
 event UnlockProfits:
-	amount: indexed(uint256)
-	remaining: indexed(uint256)
+	amount: uint256
+	remaining: uint256
 	vesting_rate: indexed(uint256)
 
 # Investing Events
 event Impair:
 	id: indexed(bytes32)
-	recovered: indexed(uint256)
-	lost: indexed(uint256)
+	recovered: uint256
+	lost: uint256
 	old_apr: int256
 	new_apr: int256
-	share_price: uint256
+	share_price: indexed(uint256)
 	fees_burned: uint256
 
 event InvestVault:
 	vault: indexed(address)
-	assets: indexed(uint256)
-	shares: indexed(uint256)
+	assets: uint256
+	shares: uint256
 
 event DivestVault:
 	vault: indexed(address)
-	assets: indexed(uint256)
+	assets: uint256
 	shares: uint256
-	profit_or_loss: indexed(uint256) # how many assets we realized as losses or gained (NOT YET realized) as profit when divesting
-	is_profit: bool
+	profit_or_loss: uint256 # how many assets we realized as losses or gained (NOT YET realized) as profit when divesting
+	is_profit: indexed(bool)
 
 # fees
 
 event FeeSet:
-	fee_bps: indexed(uint16)
-	fee_type: indexed(FEE_TYPES)
+	fee_bps: uint16
+	fee_type: indexed(uint256)
 
 event NewPendingRevRecipient:
-	new_recipient: address 	# New active management fee
+	new_recipient: indexed(address) 	# New active management fee
 
 event AcceptRevRecipient:
-	new_recipient: address 	# New active management fee
+	new_recipient: indexed(address) 	# New active management fee
 
 event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	payer: indexed(address) # where fees are being paid from
-	token: indexed(address) # where fees are being paid from
-	revenue: indexed(uint256) # total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
+	token: address 			# where fees are being paid from
+	revenue: uint256 		# total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
 	amount: uint256			# tokens paid in fees, denominated in 
-	fee_type: FEE_TYPES		# maps to app specific fee enum or eventually some standard fee code system
-	receiver: address 		# who is getting the fees paid
+	fee_type: indexed(uint256) # maps to app specific fee enum or eventually some standard fee code system
+	receiver: indexed(address) # who is getting the fees paid
 
 event RevenueClaimed:
 	rev_recipient: indexed(address)
-	amount: indexed(uint256)
+	amount: uint256
 
 # Admin updates
 
@@ -1873,18 +1879,17 @@ event AcceptOwner:
 	new_recipient: indexed(address) # New active governance
 
 event UpdateMinDeposit:
-	minimum: indexed(uint256) # New active deposit limit
+	minimum: uint256 # New active deposit limit
 
 event UpdateMaxAssets:
-	maximum: indexed(uint256) # New active deposit limit
+	maximum: uint256 # New active deposit limit
 
 event Sweep:
 	token: indexed(address) # New active deposit limit
-	amount: indexed(uint256) # New active deposit limit
+	amount: uint256 # New active deposit limit
 
 event UpdateProfitDegredation:
-	degredation: indexed(uint256)
-
+	degredation: uint256
 
 
 # Testing events

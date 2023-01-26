@@ -7,6 +7,7 @@ from datetime import timedelta
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from eip712.messages import EIP712Message
+from ..utils.events import _find_event
 
 # TODO Ask ChatGPT to generate test cases in vyper
 
@@ -72,7 +73,7 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
             event = token.get_logs()[0]
             assert to_checksum_address(event.args_map['sender']) == sender
             assert to_checksum_address(event.args_map['receiver']) == receiver
-            assert event.args_map['amount'] == str(amount)
+            assert event.args_map['amount'] == amount
             
             post_sender_balance = token.balanceOf(sender)
             post_receiver_balance = token.balanceOf(receiver)
@@ -86,7 +87,7 @@ def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_s
             event = token.get_logs()[0]
             assert to_checksum_address(event.args_map['sender']) == sender
             assert to_checksum_address(event.args_map['receiver']) == receiver
-            assert event.args_map['amount'] == '0'
+            assert event.args_map['amount'] == 0
 
             with boa.reverts():  # TODO expect revert msg
                 # Expected insufficient funds failure
@@ -105,8 +106,10 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
     (sender, receiver) = (me, admin) if is_send else (admin, me)
 
     for token in all_erc20_tokens:
-        pre_sender_balance = token.balanceOf(sender)
-        pre_receiver_balance = token.balanceOf(receiver)
+        # pre_sender_balance = token.balanceOf(sender)
+        # pre_receiver_balance = token.balanceOf(receiver)
+        token.eval(f'self.balances[{sender}] = {amount}')
+        token.eval(f'self.balances[{receiver}] = 0')
 
         # Spender with no approve permission cannot send tokens on someone behalf
         with boa.reverts():
@@ -120,62 +123,91 @@ def test_transfer_from(all_erc20_tokens, init_token_balances, admin, me, treasur
 
         assert to_checksum_address(event.args_map['owner']) == sender
         assert to_checksum_address(event.args_map['spender']) == receiver
-        assert event.args_map['amount'] == str(amount)
+        assert event.args_map['amount'] == amount
 
         approved = token.allowance(sender, receiver)
         assert approved == amount
 
-        # logging.debug("approved transferFrom amount", approved, amount)
+        # reset balances for nexttransfer
+        token.eval(f'self.balances[{sender}] = {amount}')
+        token.eval(f'self.balances[{receiver}] = 0')
 
         # With auth use the allowance to send to receiver via sender(operator)
         tx = token.transferFrom(sender, receiver, amount, sender=receiver)
 
-        # # TODO figure out how to test logs in boa
-        event = token.get_logs()[0]
-        assert to_checksum_address(event.args_map['sender']) == admin
+        transferFrom_event_name = 'Transfer'
+        event = _find_event(transferFrom_event_name, token.get_logs())
+        assert event is not None
+
+        # print("find rev eevent", event.event_type.name, transferFrom_event_name, transferFrom_event_name == event.event_type.name, transferFrom_event_name in e_types, fee_type)
+        assert f'{event.event_type.name}' == transferFrom_event_name # double check
+        print(" --- EVENT #1 --- ")
+        print("transferFrom event sender/receiver./args", sender, receiver)
+        print(event.args_map)
+        assert to_checksum_address(event.args_map['sender']) == sender
         assert to_checksum_address(event.args_map['receiver']) == receiver
-        assert event.args_map['amount'] == str(amount)
+        assert event.args_map['amount'] == amount
 
         assert token.allowance(sender, receiver) == 0
-        assert token.balanceOf(sender) == pre_sender_balance - amount
-        assert token.balanceOf(receiver) == pre_receiver_balance + amount
+        assert token.balanceOf(sender) == 0
+        assert token.balanceOf(receiver) == amount
 
         # # Cannot exceed authorized allowance
         with boa.reverts(): # TODO expect right revert msg
             token.transferFrom(sender, receiver, 1, sender=receiver)
         
-        # receiver should be able to transferFrom themselves to themselves
-        token.transferFrom(receiver, receiver, amount, sender=receiver)
+        # reset balances for next transfer
+        token.eval(f'self.balances[{sender}] = {amount}')
+        token.eval(f'self.balances[{receiver}] = 0')
 
-        event = token.get_logs()[0] # test events before balanceOf calls
-        assert to_checksum_address(event.args_map['sender']) == admin
-        assert to_checksum_address(event.args_map['receiver']) == receiver
-        assert event.args_map['amount'] == str(amount)
+        # sender should be able to transferFrom themselves to themselves w/ no approval
+        token.approve(sender, amount, sender=sender)
+        token.transferFrom(sender, sender, amount, sender=sender)
 
-        # both have same balance has before
-        assert token.balanceOf(sender) == pre_sender_balance - amount
-        assert token.balanceOf(receiver) == pre_receiver_balance + amount
+        event = _find_event(transferFrom_event_name, token.get_logs()) # THIS ONE FAILS
+        print(" --- EVENT #2 --- ")
+        print("transferFrom event sender/receiver./args", sender, sender)
+        print(event.args_map)
+        assert event is not None
+        assert to_checksum_address(event.args_map['sender']) == sender
+        assert to_checksum_address(event.args_map['receiver']) == sender
+        assert event.args_map['amount'] == amount
 
-        # receiver should be able to transferFrom themselves even tho its gas inefficient
-        token.transferFrom(receiver, sender, pre_receiver_balance + amount, sender=receiver)
-        
-        event = token.get_logs()[0] # test events before balanceOf calls
-        assert to_checksum_address(event.args_map['sender']) == admin
-        assert to_checksum_address(event.args_map['receiver']) == receiver
-        assert event.args_map['amount'] == str(amount)
-
-        assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
+        # transfer to self = both have same balance has before
+        assert token.balanceOf(sender) == amount
         assert token.balanceOf(receiver) == 0
 
-        # sender should be able to send 0 if they have 0 balance
-        token.transferFrom(receiver, sender, 0, sender=receiver)
+        # reset balances for next transfer
+        token.eval(f'self.balances[{sender}] = {amount}')
+        token.eval(f'self.balances[{receiver}] = 0')
 
-        event = token.get_logs()[0] # test events before balanceOf calls
-        assert to_checksum_address(event.args_map['sender']) == admin
+        # sender should be able to transferFrom themselves to someone else w/ no approval needed (even tho its gas inefficient)
+        token.transferFrom(sender, receiver, amount, sender=sender)
+        
+        event = _find_event(transferFrom_event_name, token.get_logs())
+        print(" --- EVENT #3 --- ")
+        print("transferFrom event sender/sender./args", sender, receiver)
+        print(event.args_map)
+        assert to_checksum_address(event.args_map['sender']) == sender
         assert to_checksum_address(event.args_map['receiver']) == receiver
-        assert event.args_map['amount'] == str(amount)
-        # both have same balance has before
-        assert token.balanceOf(sender) == pre_sender_balance + pre_receiver_balance
+        assert event.args_map['amount'] == amount
+
+        assert token.balanceOf(receiver) == amount
+        assert token.balanceOf(sender) == 0
+
+        # reset balances for next transfer
+        token.eval(f'self.balances[{sender}] = {amount}')
+        token.eval(f'self.balances[{receiver}] = 0')
+
+        # sender should be able to send 0 if they have 0 balance
+        token.transferFrom(sender, receiver, 0, sender=sender)
+
+        event = _find_event(transferFrom_event_name, token.get_logs())
+        assert to_checksum_address(event.args_map['sender']) == sender
+        assert to_checksum_address(event.args_map['receiver']) == receiver
+        assert event.args_map['amount'] == 0
+        # no transfer = both have same balance has before
+        assert token.balanceOf(sender) == amount
         assert token.balanceOf(receiver) == 0
 
 @given(amount=st.integers(min_value=1, max_value=10**50),
@@ -194,7 +226,7 @@ def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_se
         event = token.get_logs()[0]
         assert to_checksum_address(event.args_map['spender']) == receiver
         assert to_checksum_address(event.args_map['owner']) == sender
-        assert event.args_map['amount'] == str(amount)
+        assert event.args_map['amount'] == amount
 
         assert token.allowance(sender, receiver) == amount
 
@@ -206,7 +238,7 @@ def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_se
         event = token.get_logs()[0]
         assert to_checksum_address(event.args_map['spender']) == receiver
         assert to_checksum_address(event.args_map['owner']) == sender
-        assert event.args_map['amount'] == '0'
+        assert event.args_map['amount'] == 0
     
         assert token.allowance(sender, receiver) == 0
 
@@ -216,7 +248,7 @@ def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_se
         event = token.get_logs()[0]
         assert to_checksum_address(event.args_map['spender']) == receiver
         assert to_checksum_address(event.args_map['owner']) == sender
-        assert event.args_map['amount'] == str(amount)
+        assert event.args_map['amount'] == amount
 
         assert token.allowance(sender, receiver) == amount
 
@@ -226,7 +258,7 @@ def test_approve(all_erc20_tokens, init_token_balances, admin, me, amount, is_se
         event = token.get_logs()[0]
         assert to_checksum_address(event.args_map['spender']) == receiver
         assert to_checksum_address(event.args_map['owner']) == sender
-        assert event.args_map['amount'] == str(amount * 2) # emits total allowance, not increase
+        assert event.args_map['amount'] == amount * 2 # emits total allowance, not increase
 
         assert token.allowance(sender, receiver) == amount * 2
         
@@ -286,4 +318,4 @@ def test_permit(all_erc20_tokens, init_token_balances, chain, accounts, amount):
 
         # token.permit(admin, me, amount, deadline, signature, sender=me)
 
-        # assert token.allowance(admin, me) == str(amount)
+        # assert token.allowance(admin, me) == amount

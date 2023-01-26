@@ -85,7 +85,7 @@ Because Ape and Boa are both experimetal software and take long af to run tests,
 
 
 `forge test -vvv`
-`ape test --network=::foundry --cache-clear -v INFO`
+`pytest`
 
 # Docs
 
