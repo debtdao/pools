@@ -101,7 +101,9 @@ contract PoolDelegateTest is Test {
 
         iToken.mint(depositer, 120 ether);
         assertEq(iToken.balanceOf(depositer), 120 ether, "incorrect token balance");
+
         vm.startPrank(depositer);
+        iToken.approve(address(pool), 100 ether);
         pool.deposit(100 ether, recipient);
         vm.stopPrank();
 
