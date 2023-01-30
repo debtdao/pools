@@ -12,6 +12,23 @@ def borrower():
 def pool_roles():
     return ['owner', 'rev_recipient']
 
+@pytest.fixture(scope="session")
+def pool_fee_types():
+    return [
+    	# NOTE: MUST be same order as Fees enum
+        'performance',
+        'deposit',
+        'withdraw',
+        'flash',
+        'collector',
+        'referral',
+        # 'snitch', unique constant fee, we test separately
+    ]
+
+@pytest.fixture(scope="session")
+def pittance_fee_types(pool_fee_types):
+    return pool_fee_types[1:] # cut performance and snitch fees of ends
+
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):
         # TODO make mock line contract for investing/impairment

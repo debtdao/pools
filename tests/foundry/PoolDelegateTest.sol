@@ -99,7 +99,7 @@ contract PoolDelegateTest is Test {
         address depositer = makeAddr("depositer");
         address recipient = makeAddr("recipient");
 
-        iToken._mint_for_testing(depositer, 120 ether);
+        iToken.mint(depositer, 120 ether);
         assertEq(iToken.balanceOf(depositer), 120 ether, "incorrect token balance");
         vm.startPrank(depositer);
         pool.deposit(100 ether, recipient);

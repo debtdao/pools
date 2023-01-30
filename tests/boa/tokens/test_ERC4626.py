@@ -13,6 +13,7 @@ FEE_COEFFICIENT = 10000 # 100% in bps
 MAX_PITTANCE_FEE = 200 # 2% in bps
 
 # TODO Ask ChatGPT to generate test cases in vyper
+# TODO copy test over  https://github.com/fubuloubu/ERC4626/blob/main/tests/test_methods.py
 
 # TEST all 4626 unit tests on preview functions. then compare preview func to actual action func 
 # (only diff between preview and action is side effects - state and events 
@@ -46,7 +47,7 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     init_token_balances does deposit flow in ../conftest.py
     """
     assert pool.balanceOf(me) == init_token_balances
-    base_asset._mint_for_testing(me, amount)
+    base_asset.mint(me, amount)
     new_balance = init_token_balances + amount
     assert base_asset.balanceOf(me) == new_balance
     

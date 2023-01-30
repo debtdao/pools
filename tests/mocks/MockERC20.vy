@@ -82,7 +82,7 @@ def approve(_spender : address, _value : uint256) -> bool:
 
 
 @external
-def _mint_for_testing(_target: address, _value: uint256) -> bool:
+def mint(_target: address, _value: uint256) -> bool:
     self.total_supply += _value
     return self._transfer(empty(address), _target, _value)
 
@@ -91,12 +91,6 @@ def _mint_for_testing(_target: address, _value: uint256) -> bool:
 def _assert_caller_has_approval(_owner: address, _amount: uint256, _caller: address, _allowance: uint256):
 	if msg.sender != _owner:
 		allowance: uint256 = self.allowances[_owner][msg.sender]
-
-		log named_uint(allowance, "allowance")
-		log named_uint(_amount, "amount")
-		log named_addy(msg.sender, "caller")
-		log named_addy(_owner, "_owner")
-
 		# MAX = unlimited approval (saves an SSTORE)
 		if (allowance < max_value(uint256)):
 			allowance = allowance - _amount

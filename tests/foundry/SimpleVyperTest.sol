@@ -33,10 +33,11 @@ contract SimpleVyperTest is Test {
         string memory name = iToken.name();
         uint256 decimals = iToken.decimals();
         emit log_named_uint("decimals", decimals);
+
         console.log(name);
         emit log_string(name);
-        vm.startPrank(debtdao);
-        iToken._mint_for_testing(recipient, 100 ether);
+
+        iToken.mint(recipient, 100 ether);
         assertEq(iToken.balanceOf(recipient), 100 ether);
     }
 }

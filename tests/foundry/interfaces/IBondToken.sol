@@ -3,7 +3,7 @@ pragma solidity >=0.8.13;
 
 
 interface IBondToken {
-    function _mint_for_testing(address _target, uint256 _value)
+    function mint(address _target, uint256 _value)
         external
         returns (bool);
 
