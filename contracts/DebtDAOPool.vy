@@ -1025,6 +1025,7 @@ def _deposit(
 	"""
 	assert _assets >= self.min_deposit # dev: fuck plebs
 	assert self.total_assets + _assets <= self.max_assets # dev: Pool max reached
+	assert _receiver != empty(address)
 	
 	share_price: uint256 = self._get_share_price()
 	shares: uint256 = _assets / share_price

@@ -89,8 +89,11 @@ contract PoolDelegateTest is Test {
 
     function test_cannot_deposit_with_empty_recipient() public {
         address user = makeAddr("depositer");
-
+        iToken.mint(user, 120 ether);
         vm.startPrank(user);
+        iToken.approve(address(pool), 100 ether);
+
+        vm.expectRevert();
         pool.deposit(100 ether, address(0));
         vm.stopPrank();
     }
