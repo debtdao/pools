@@ -1,5 +1,6 @@
 # track nightly titanboa releases
 git+https://github.com/vyperlang/titanoboa
+# git+https://github.com/kibagateaux/titanoboa # for experimental boa features
 hypothesis
 pytest
 pdbpp
