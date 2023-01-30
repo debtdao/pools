@@ -4,18 +4,8 @@ pragma solidity >=0.8.13;
 import "forge-std/Test.sol";
 
 import {VyperDeployer} from "./utils/VyperDeployer.sol";
+import {IBondToken} from "./interfaces/IBondToken.sol";
 
-interface IBondToken {
-    function _mint_for_testing(address _target, uint256 _value)
-        external
-        returns (bool);
-
-    function balanceOf(address _owner) external view returns (uint256);
-
-    function name() external view returns (string memory);
-
-    function decimals() external view returns (uint256);
-}
 
 contract SimpleVyperTest is Test {
     ///@notice create a new instance of VyperDeployer
