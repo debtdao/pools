@@ -818,6 +818,7 @@ def _erc20_safe_transfer(_token: address, _receiver: address, _amount: uint256):
 	)
 	if len(response) > 0:
 		assert convert(response, bool), "Transfer failed!"
+		# raw_revert(method_id("TransferFailed"))
 
 
 # 4626 + Pool internal functions
