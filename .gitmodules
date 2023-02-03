@@ -1,4 +1,7 @@
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-	branch = v1.2.0
+[submodule "lib/Line-of-Credit"]
+	path = lib/Line-of-Credit
+	url = https://github.com/debtdao/Line-of-Credit
+	branch = develop

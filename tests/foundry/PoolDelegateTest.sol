@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.8.13;
+pragma solidity 0.8.16;
 
 import "forge-std/Test.sol";
 
 import {VyperDeployer} from "./utils/VyperDeployer.sol";
 import {IBondToken} from "./interfaces/IBondToken.sol";
 import {IDebtDAOPool, Fees} from "./interfaces/IDebtDAOPool.sol";
-
+import {LineFactory} from "debtdao/modules/factories/LineFactory.sol";
+import {ModuleFactory} from "debtdao/modules/factories/ModuleFactory.sol";
 contract PoolDelegateTest is Test {
 
     string constant POOL_NAME = "Test Pool";
@@ -117,10 +118,10 @@ contract PoolDelegateTest is Test {
     // =================== CREDIT
 
     function test_cannot_add_credit_as_non_delegate() external {
-        vm.expectRevert("not owner");
         address line = makeAddr("line");
 
         vm.startPrank(makeAddr("nondelegate"));
+        vm.expectRevert("not owner");
         pool.add_credit(line, 200, 200, 1 ether);
         vm.stopPrank();
     }
@@ -129,35 +130,4 @@ contract PoolDelegateTest is Test {
     }
     
 
-    // function test_pool_fee_structure(uint16 _performance, uint16 _deposit, uint16 _withdraw, uint16 _flash, uint16 _collector, uint16 _referral ) public {
-    //     // _performance = uint16(bound(_performance, 0, 20));
-    //     // _deposit = uint16(bound(_deposit, 0, 20));
-    //     // _withdraw = uint16(bound(_withdraw, 0, 20));
-    //     // _flash = uint16(bound(_flash, 0, 20));
-    //     // _collector = uint16(bound(_collector, 0, 20));
-    //     // _referral = uint16(bound(_referral, 0, 20));
-
-    //     fees = Fees(
-    //         _performance,
-    //         _deposit,
-    //         _withdraw,
-    //         _flash,
-    //         _collector,
-    //         _referral
-    //     );
-
-    //     pool = IDebtDAOPool(
-    //         vyperDeployer.deployContract(
-    //             "contracts/DebtDAOPool",
-    //             abi.encode(
-    //                 delegate,           // delegate
-    //                 address(iToken),    // asset
-    //                 "Test Pool",        // name
-    //                 "TP",               // symbol
-    //                 fees                // fees
-    //             )
-    //         )
-    //     );
-
-    // }
 }

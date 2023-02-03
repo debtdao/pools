@@ -1,3 +1,4 @@
 ds-test/=lib/forge-std/lib/ds-test/src/
 forge-std/=lib/forge-std/src/
 utils/=lib/utils/
+debtdao/=lib/Line-of-Credit/contracts/
