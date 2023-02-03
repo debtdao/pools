@@ -87,6 +87,20 @@ Because Ape and Boa are both experimetal software and take long af to run tests,
 `forge test -vvv`
 `pytest`
 
+### Foundry Testing
+
+Update the submodules to track the remote branches.
+
+```
+git submodule update --init --recursive --remote
+```
+
+then run the tests:
+
+```
+forge test
+```
+
 # Docs
 
 install Mermaid CLI
