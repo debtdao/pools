@@ -163,6 +163,23 @@ contract PoolDelegateTest is Test {
     }
     function test_can_add_credit() public {
 
+        address depositerA = makeAddr("depositerA");
+        address depositerB = makeAddr("depositerB");
+        iTokenA.mint(depositerA, 100 ether);
+        iTokenA.mint(depositerB, 100 ether);
+
+        vm.startPrank(depositerA);
+        iTokenA.approve(address(pool), 100 ether);
+        pool.deposit(100 ether, depositerA); // depositer will receive the pool tokens
+        vm.stopPrank();
+
+        vm.startPrank(depositerB);
+        iTokenA.approve(address(pool), 100 ether);
+        pool.deposit(100 ether, depositerB); // depositer will receive the pool tokens
+        vm.stopPrank();
+
+         vm.startPrank(delegate);
+         bytes32 id = pool.add_credit(address(line), 1000, 1000, 200 ether);
     }
     
     // =================== INTERNAL HELPERS
