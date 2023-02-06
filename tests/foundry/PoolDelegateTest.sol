@@ -8,6 +8,9 @@ import {IBondToken} from "./interfaces/IBondToken.sol";
 import {IDebtDAOPool, Fees} from "./interfaces/IDebtDAOPool.sol";
 import {LineFactory} from "debtdao/modules/factories/LineFactory.sol";
 import {ModuleFactory} from "debtdao/modules/factories/ModuleFactory.sol";
+import {SimpleOracle} from "debtdao/mock/SimpleOracle.sol";
+import {SecuredLine} from "debtdao/modules/credit/SecuredLine.sol";
+
 contract PoolDelegateTest is Test {
 
     string constant POOL_NAME = "Test Pool";
@@ -15,25 +18,54 @@ contract PoolDelegateTest is Test {
 
     VyperDeployer vyperDeployer = new VyperDeployer();
     
-    IBondToken iToken;
+    LineFactory lineFactory;
+    ModuleFactory moduleFactory;
+    SimpleOracle oracle;
+    SecuredLine line;
+
+    IBondToken iTokenA;
+    IBondToken iTokenB;
+
     IDebtDAOPool pool;
     Fees fees;
 
     address delegate;
+    address arbiter;
+    address borrower;
+    address swapTarget;
+
+    uint256 ttl = 180 days;
 
     function setUp() public {
         delegate = makeAddr("delegate");
+        arbiter = makeAddr("arbiter");
+        borrower = makeAddr("borroer");
+        swapTarget = makeAddr("swapTargey");
 
-        iToken = IBondToken(
+        // deploy the tokens
+        iTokenA = IBondToken(
             vyperDeployer.deployContract(
                 "tests/mocks/MockERC20",
                 abi.encode(
-                    "Vyper Token", // name
-                    "VTK", // symbol
+                    "Vyper Bond Token A", // name
+                    "VTKA", // symbol
                     18 //decimals
                 )
             )
         );
+        iTokenB = IBondToken(
+            vyperDeployer.deployContract(
+                "tests/mocks/MockERC20",
+                abi.encode(
+                    "Vyper Bond Token B", // name
+                    "VTKB", // symbol
+                    18 //decimals
+                )
+            )
+        );
+
+        // deploy the oracle
+        oracle = new SimpleOracle(address(iTokenA), address(iTokenB));
 
         fees = Fees(
             100,
@@ -43,15 +75,19 @@ contract PoolDelegateTest is Test {
             50,
             20
         );
+        _deployLine();
+        _deployPool();
+    }
 
-        // deploy the pool as teh delegate
+    function _deployPool() internal {
+        // deploy the pool as the delegate
         vm.startPrank(delegate);
         pool = IDebtDAOPool(
             vyperDeployer.deployContract(
                 "contracts/DebtDAOPool",
                 abi.encode(
                     delegate,           // delegate
-                    address(iToken),    // asset
+                    address(iTokenA),    // asset
                     POOL_NAME,          // name
                     POOL_SYMBOL,        // symbol
                     fees                // fees
@@ -90,9 +126,9 @@ contract PoolDelegateTest is Test {
 
     function test_cannot_deposit_with_empty_recipient() public {
         address user = makeAddr("depositer");
-        iToken.mint(user, 120 ether);
+        iTokenA.mint(user, 120 ether);
         vm.startPrank(user);
-        iToken.approve(address(pool), 100 ether);
+        iTokenA.approve(address(pool), 100 ether);
 
         vm.expectRevert();
         pool.deposit(100 ether, address(0));
@@ -103,15 +139,15 @@ contract PoolDelegateTest is Test {
         address depositer = makeAddr("depositer");
         address recipient = makeAddr("recipient");
 
-        iToken.mint(depositer, 120 ether);
-        assertEq(iToken.balanceOf(depositer), 120 ether, "incorrect token balance");
+        iTokenA.mint(depositer, 120 ether);
+        assertEq(iTokenA.balanceOf(depositer), 120 ether, "incorrect token balance");
 
         vm.startPrank(depositer);
-        iToken.approve(address(pool), 100 ether);
+        iTokenA.approve(address(pool), 100 ether);
         pool.deposit(100 ether, recipient);
         vm.stopPrank();
 
-        assertEq(iToken.balanceOf(depositer), 20 ether, "user balance does not match after depositing into pool");
+        assertEq(iTokenA.balanceOf(depositer), 20 ether, "user balance does not match after depositing into pool");
     }
 
 
@@ -129,5 +165,18 @@ contract PoolDelegateTest is Test {
 
     }
     
+    // =================== INTERNAL HELPERS
+
+    function _deployLine() internal {
+        moduleFactory = new ModuleFactory();
+        lineFactory = new LineFactory(
+            address(moduleFactory),
+            arbiter,
+            address(oracle),
+            payable(swapTarget) // swap target
+        );
+        address lineAddr = lineFactory.deploySecuredLine(borrower, ttl);
+        line = SecuredLine(payable(lineAddr));
+    }
 
 }

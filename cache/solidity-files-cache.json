@@ -430,6 +430,59 @@
         }
       }
     },
+    "lib/Line-of-Credit/contracts/mock/SimpleOracle.sol": {
+      "lastModificationDate": 1675461794670,
+      "contentHash": "731e09782df153c79214b24cb41fd2a5",
+      "sourceName": "lib/Line-of-Credit/contracts/mock/SimpleOracle.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [
+        "lib/Line-of-Credit/contracts/interfaces/IInterestRateCredit.sol",
+        "lib/Line-of-Credit/contracts/interfaces/ILineOfCredit.sol",
+        "lib/Line-of-Credit/contracts/interfaces/IOracle.sol",
+        "lib/Line-of-Credit/contracts/utils/LineLib.sol",
+        "lib/Line-of-Credit/lib/chainlink/contracts/src/v0.8/Denominations.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Address.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Context.sol"
+      ],
+      "versionRequirement": "=0.8.16",
+      "artifacts": {
+        "SimpleOracle": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "SimpleOracle.sol/SimpleOracle.json"
+        }
+      }
+    },
     "lib/Line-of-Credit/contracts/modules/credit/EscrowedLine.sol": {
       "lastModificationDate": 1675461794671,
       "contentHash": "0b2541f31cc8bae0a27e33367cd185ca",
@@ -1440,6 +1493,50 @@
         }
       }
     },
+    "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol": {
+      "lastModificationDate": 1675361016821,
+      "contentHash": "6ed89860245df37c4ee9b36b18f2c301",
+      "sourceName": "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Context.sol"
+      ],
+      "versionRequirement": "^0.8.0",
+      "artifacts": {
+        "ERC20": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "ERC20.sol/ERC20.json"
+        }
+      }
+    },
     "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol": {
       "lastModificationDate": 1675361016821,
       "contentHash": "d3f395dc838796643e7a71419900ab23",
@@ -1477,6 +1574,48 @@
       "artifacts": {
         "IERC20": {
           "0.8.16+commit.07a7930e.Darwin.appleclang": "IERC20.sol/IERC20.json"
+        }
+      }
+    },
+    "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol": {
+      "lastModificationDate": 1675361003229,
+      "contentHash": "909ab67fc5c25033fe6cd364f8c056f9",
+      "sourceName": "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"
+      ],
+      "versionRequirement": "^0.8.0",
+      "artifacts": {
+        "IERC20Metadata": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "IERC20Metadata.sol/IERC20Metadata.json"
         }
       }
     },
@@ -1601,6 +1740,46 @@
       "artifacts": {
         "Address": {
           "0.8.16+commit.07a7930e.Darwin.appleclang": "Address.sol/Address.json"
+        }
+      }
+    },
+    "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Context.sol": {
+      "lastModificationDate": 1675361003233,
+      "contentHash": "5f2c5c4b6af2dd4551027144797bc8be",
+      "sourceName": "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Context.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [],
+      "versionRequirement": "^0.8.0",
+      "artifacts": {
+        "Context": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "Context.sol/Context.json"
         }
       }
     },
@@ -2253,8 +2432,8 @@
       }
     },
     "tests/foundry/PoolDelegateTest.sol": {
-      "lastModificationDate": 1675461858317,
-      "contentHash": "e409dad9b373fc12aef76f6ba409d586",
+      "lastModificationDate": 1675710469222,
+      "contentHash": "3a75061c0b9e106d27862af74e281801",
       "sourceName": "tests/foundry/PoolDelegateTest.sol",
       "solcConfig": {
         "settings": {
@@ -2295,6 +2474,7 @@
         "lib/Line-of-Credit/contracts/interfaces/ISecuredLine.sol",
         "lib/Line-of-Credit/contracts/interfaces/ISpigot.sol",
         "lib/Line-of-Credit/contracts/interfaces/ISpigotedLine.sol",
+        "lib/Line-of-Credit/contracts/mock/SimpleOracle.sol",
         "lib/Line-of-Credit/contracts/modules/credit/EscrowedLine.sol",
         "lib/Line-of-Credit/contracts/modules/credit/LineOfCredit.sol",
         "lib/Line-of-Credit/contracts/modules/credit/SecuredLine.sol",
@@ -2314,10 +2494,13 @@
         "lib/Line-of-Credit/contracts/utils/SpigotedLineLib.sol",
         "lib/Line-of-Credit/lib/chainlink/contracts/src/v0.8/Denominations.sol",
         "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
         "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
         "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol",
         "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol",
         "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Address.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Context.sol",
         "lib/forge-std/lib/ds-test/src/test.sol",
         "lib/forge-std/src/Base.sol",
         "lib/forge-std/src/StdAssertions.sol",
