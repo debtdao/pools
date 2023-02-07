@@ -74,7 +74,7 @@ interface IDebtDAOPool:
 ### TODO only making public for testing purposes. ideally could remain private but still have easy access from tests
 
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
-FEE_COEFFICIENT: public(constant(uint16)) = 10000
+FEE_COEFFICIENT: public(constant(uint256)) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
 # IF owner fees exist when snitched on. Pool depositors are *guaranteed* to see a price increase, hence heavy incentive to snitches.
 SNITCH_FEE: public(constant(uint16)) = 3000
@@ -459,17 +459,17 @@ def set_max_assets(new_max: uint256)  -> bool:
 ### Manage Pool Fees
 
 @internal
-def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES) -> bool:
+def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES):
   assert msg.sender == self.owner, "not owner"
-  assert _fee <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
+  assert convert(_fee, uint256) <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
   log FeeSet(_fee, convert(_fee_type, uint256))
-  return True
 
 @external
 @nonreentrant("lock")
 def set_performance_fee(_fee: uint16) -> bool:
+  self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
   self.fees.performance = _fee
-  return self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
+  return True
 
 @internal
 def _assert_pittance_fee(_fee: uint16, fee_type: FEE_TYPES):
@@ -846,6 +846,18 @@ def _burn(owner: address, _shares: uint256, _assets: uint256) -> bool:
 	self._transfer(owner, empty(address), _shares)
 	return True
 
+
+@internal
+@pure
+def _calc_fee(shares: uint256, fee: uint16) -> uint256:
+	"""
+	@dev	does NOT emit `log RevenueGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
+	"""
+	if fee == 0:
+		return 0
+	else:
+		return (shares * convert(fee, uint256)) / FEE_COEFFICIENT
+
 @internal
 def _calc_and_mint_fee(
 	payer: address,
@@ -870,20 +882,8 @@ def _calc_and_mint_fee(
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
 	log RevenueGenerated(payer, self, fees, shares, convert(fee_type, uint256), to)
-
+	
 	return fees
-
-
-@internal
-@pure
-def _calc_fee(shares: uint256, fee: uint16) -> uint256:
-	"""
-	@dev	does NOT emit `log RevenueGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
-	"""
-	if fee == 0:
-		return 0
-	else:
-		return (shares * convert(fee, uint256)) / convert(FEE_COEFFICIENT, uint256)
 
 @internal 
 def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
@@ -1031,10 +1031,14 @@ def _deposit(
 	shares: uint256 = _assets / share_price
 
 	# call even if fees = 0 to log revenue for prod analytics
-	self._calc_and_mint_fee(_receiver, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
-	# call even if fees = 0 to log revenue for prod analytics
+	self._calc_and_mint_fee(self, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
+	
+	referral_fee: uint256 = 0
 	if _referrer != empty(address):
-		self._calc_and_mint_fee(_receiver, _referrer, shares, self.fees.referral, FEE_TYPES.REFERRAL)
+		referral_fee = self._calc_fee(shares, self.fees.referral)
+
+	# call even if fees = 0 to log revenue for prod analytics
+	self._calc_and_mint_fee(self, _referrer, shares, self.fees.referral, FEE_TYPES.REFERRAL)
 
 	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
 
