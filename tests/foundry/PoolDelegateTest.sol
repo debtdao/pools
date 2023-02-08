@@ -11,7 +11,10 @@ import {ModuleFactory} from "debtdao/modules/factories/ModuleFactory.sol";
 import {SimpleOracle} from "debtdao/mock/SimpleOracle.sol";
 import {SecuredLine} from "debtdao/modules/credit/SecuredLine.sol";
 
-contract PoolDelegateTest is Test {
+interface Events {
+    event MutualConsentRegistered(bytes32 proposalId, address taker);
+}
+contract PoolDelegateTest is Test, Events {
 
     string constant POOL_NAME = "Test Pool";
     string constant POOL_SYMBOL = "TP";
@@ -22,6 +25,7 @@ contract PoolDelegateTest is Test {
     ModuleFactory moduleFactory;
     SimpleOracle oracle;
     SecuredLine line;
+    SecuredLine nonPoolLine;
 
     IBondToken iTokenA;
     IBondToken iTokenB;
@@ -34,13 +38,18 @@ contract PoolDelegateTest is Test {
     address borrower;
     address swapTarget;
 
+    address userA;
+    address userB;
+
     uint256 ttl = 180 days;
 
     function setUp() public {
         delegate = makeAddr("delegate");
         arbiter = makeAddr("arbiter");
-        borrower = makeAddr("borroer");
-        swapTarget = makeAddr("swapTargey");
+        borrower = makeAddr("borrower");
+        swapTarget = makeAddr("swapTarget");
+        userA = makeAddr("userA");
+        userB = makeAddr("userB");
 
         // deploy the tokens
         iTokenA = IBondToken(
@@ -79,25 +88,7 @@ contract PoolDelegateTest is Test {
         _deployPool();
     }
 
-    function _deployPool() internal {
-        // deploy the pool as the delegate
-        vm.startPrank(delegate);
-        pool = IDebtDAOPool(
-            vyperDeployer.deployContract(
-                "contracts/DebtDAOPool",
-                abi.encode(
-                    delegate,           // delegate
-                    address(iTokenA),    // asset
-                    POOL_NAME,          // name
-                    POOL_SYMBOL,        // symbol
-                    fees                // fees
-                )
-            )
-        );
 
-        pool.set_min_deposit(0.1 ether);
-        vm.stopPrank();
-    }
 
     function test_can_deploy_pool() public {
         assertEq(pool.owner(), delegate, "owner not delegate");
@@ -161,28 +152,70 @@ contract PoolDelegateTest is Test {
         pool.add_credit(line, 200, 200, 1 ether);
         vm.stopPrank();
     }
-    function test_can_add_credit() public {
+    function test_can_add_credit_and_increase_credit() public {
 
-        address depositerA = makeAddr("depositerA");
-        address depositerB = makeAddr("depositerB");
-        iTokenA.mint(depositerA, 100 ether);
-        iTokenA.mint(depositerB, 100 ether);
+        _usersDepositIntoPool();
 
-        vm.startPrank(depositerA);
-        iTokenA.approve(address(pool), 100 ether);
-        pool.deposit(100 ether, depositerA); // depositer will receive the pool tokens
+        bytes32 id = _addCredit();
+
+        vm.warp(block.timestamp + 30 days);
+        vm.startPrank(borrower);
+        line.increaseCredit(id, 1 ether);
         vm.stopPrank();
 
-        vm.startPrank(depositerB);
-        iTokenA.approve(address(pool), 100 ether);
-        pool.deposit(100 ether, depositerB); // depositer will receive the pool tokens
+        vm.startPrank(delegate);
+        pool.increase_credit(address(line), id, 1 ether);
         vm.stopPrank();
 
-         vm.startPrank(delegate);
-         bytes32 id = pool.add_credit(address(line), 1000, 1000, 200 ether);
+    }
+
+    function test_non_pool_line() public {
+        address lender = makeAddr("lender");
+        iTokenA.mint(lender, 200 ether);
+
+        vm.startPrank(lender);
+        iTokenA.approve(address(nonPoolLine), 100 ether);
+        nonPoolLine.addCredit(1000, 1000, 100 ether, address(iTokenA), lender);
+        vm.stopPrank();
+
+        vm.startPrank(borrower);
+        bytes32 id = nonPoolLine.addCredit(1000, 1000, 100 ether, address(iTokenA), lender);
+        emit log_named_bytes32("nonPool ID", id);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 30 days);
+
+        vm.startPrank(lender);
+        nonPoolLine.increaseCredit(id, 100 ether);
+        vm.stopPrank();
+    }
+
+    function test_can_set_rates() public {
+        _usersDepositIntoPool();
+        bytes32 id = _addCredit();
+
+        vm.startPrank(delegate);
+        pool.set_rates(address(line), id, 500,500);
+        vm.stopPrank();
     }
     
     // =================== INTERNAL HELPERS
+
+    function _usersDepositIntoPool() internal {
+ 
+        iTokenA.mint(userA, 150 ether);
+        iTokenA.mint(userB, 150 ether);
+
+        vm.startPrank(userA);
+        iTokenA.approve(address(pool), 150 ether);
+        pool.deposit(150 ether, userA); // depositer will receive the pool tokens
+        vm.stopPrank();
+
+        vm.startPrank(userB);
+        iTokenA.approve(address(pool), 150 ether);
+        pool.deposit(150 ether, userB); // depositer will receive the pool tokens
+        vm.stopPrank();
+    }
 
     function _deployLine() internal {
         moduleFactory = new ModuleFactory();
@@ -192,8 +225,43 @@ contract PoolDelegateTest is Test {
             address(oracle),
             payable(swapTarget) // swap target
         );
+        address nonPoolLineAddr = lineFactory.deploySecuredLine(borrower, ttl);
         address lineAddr = lineFactory.deploySecuredLine(borrower, ttl);
         line = SecuredLine(payable(lineAddr));
+        nonPoolLine = SecuredLine(payable(nonPoolLineAddr));
+    }
+
+    function _deployPool() internal {
+        // deploy the pool as the delegate
+        vm.startPrank(delegate);
+        pool = IDebtDAOPool(
+            vyperDeployer.deployContract(
+                "contracts/DebtDAOPool",
+                abi.encode(
+                    delegate,           // delegate
+                    address(iTokenA),    // asset
+                    POOL_NAME,          // name
+                    POOL_SYMBOL,        // symbol
+                    fees                // fees
+                )
+            )
+        );
+
+        pool.set_min_deposit(0.1 ether);
+        vm.stopPrank();
+    }
+
+    function _addCredit() internal returns (bytes32 id){
+        vm.startPrank(delegate);
+        vm.expectEmit(false, false, false, false);
+        emit MutualConsentRegistered(bytes32(0), borrower);
+        pool.add_credit(address(line), 1000, 1000, 200 ether);
+        vm.stopPrank();
+
+        vm.startPrank(borrower);
+        id = line.addCredit(1000, 1000, 200 ether, address(iTokenA), address(pool));
+        emit log_named_bytes32("pool ID", id);
+        vm.stopPrank();
     }
 
 }

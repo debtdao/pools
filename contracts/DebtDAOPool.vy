@@ -43,8 +43,8 @@ interface IDebtDAOPool:
 	# investments
 	def unlock_profits() -> uint256: nonpayable
 	def collect_interest(line: address, id: bytes32) -> uint256: nonpayable
-	def increase_credit( line: address, id: bytes32, amount: uint256) -> bool: nonpayable
-	def set_rates( line: address, id: bytes32, drate: uint128, frate: uint128) -> bool: nonpayable
+	def increase_credit( line: address, id: bytes32, amount: uint256): nonpayable
+	def set_rates( line: address, id: bytes32, drate: uint128, frate: uint128): nonpayable
 	def add_credit( line: address, drate: uint128, frate: uint128, amount: uint256) -> bytes32: nonpayable
 
 	# divestment and loss
@@ -254,25 +254,34 @@ def add_credit(_line: address, _drate: uint128, _frate: uint128, _amount: uint25
 	assert ISecuredLine(_line).borrower() != self
 	
 	self.total_deployed += _amount
+
+	# approve the transfer of assets from the pool to the line
+	IERC20(ASSET).approve(_line, _amount)
 	
 	# NOTE: no need to log, Line emits events already
 	return ISecuredLine(_line).addCredit(_drate, _frate, _amount, ASSET, self)
 
 @external
 @nonreentrant("lock")
-def increase_credit(line: address, id: bytes32, amount: uint256) -> bool:
-	self._assert_delegate_has_available_funds(amount)
+def increase_credit(_line: address, _id: bytes32, _amount: uint256):
+	assert _id != empty(bytes32)
+	assert _line != empty(address)
+	self._assert_delegate_has_available_funds(_amount)
 
-	self.total_deployed += amount
+	self.total_deployed += _amount
+
+	# approve the transfer of assets from the pool to the line
+	IERC20(ASSET).approve(_line, _amount)
 
 	# NOTE: no need to log, Line emits events already
-	return ISecuredLine(line).increaseCredit(id, amount)
+	ISecuredLine(_line).increaseCredit(_id, _amount)
+	# log test_event("random")
 
 @external
-def set_rates(line: address, id: bytes32, drate: uint128, frate: uint128) -> bool:
+def set_rates(line: address, id: bytes32, drate: uint128, frate: uint128):
 	assert msg.sender == self.owner, "not owner"
 	# NOTE: no need to log, Line emits events already
-	return ISecuredLine(line).setRates(id, drate, frate)
+	ISecuredLine(line).setRates(id, drate, frate)
 
 @external
 @nonreentrant("lock")
@@ -1774,8 +1783,8 @@ interface ISecuredLine:
 		token: address,
 		lender: address
 	)-> bytes32: payable
-	def setRates(id: bytes32, drate: uint128, frate: uint128) -> bool: nonpayable
-	def increaseCredit(id: bytes32,  amount: uint256) -> bool: payable
+	def setRates(id: bytes32, drate: uint128, frate: uint128): nonpayable
+	def increaseCredit(id: bytes32,  amount: uint256): payable
 
 	# self-repay
 	def useAndRepay(amount: uint256) -> bool: nonpayable
@@ -1901,3 +1910,6 @@ event named_uint:
 event named_addy:
 	addy: indexed(address)
 	str: indexed(String[100])
+
+event test_event:
+	str: String[32]
