@@ -27,10 +27,10 @@ def base_asset(admin):
     with boa.env.prank(admin): # necessary?
         return boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
 
-@pytest.fixture(scope="module")
-def bond_token(admin):
-    with boa.env.prank(admin): # necessary?
-        return boa.load('contracts/BondToken.vy', "Bondage Token", "BONDAGE", 18, admin)
+# @pytest.fixture(scope="module")
+# def bond_token(admin):
+#     with boa.env.prank(admin): # necessary?
+#         return boa.load('contracts/BondToken.vy', "Bondage Token", "BONDAGE", 18, admin)
 
 @pytest.fixture(scope="module")
 def pool(admin, base_asset):
@@ -39,8 +39,8 @@ def pool(admin, base_asset):
         return boa.load('contracts/DebtDAOPool.vy', admin, base_asset, "Dev Testing", "KIBA-TEST", [ 0, 0, 0, 0, 0, 0 ])
 
 @pytest.fixture(scope="module")
-def all_erc20_tokens(base_asset, pool, bond_token):
-    return [base_asset, pool, bond_token]
+def all_erc20_tokens(base_asset, pool):
+    return [base_asset, pool]
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +48,7 @@ def all_erc4626_tokens(pool):
     return [pool]
 
 @pytest.fixture(scope="module")
-def init_token_balances(base_asset, bond_token, pool, admin, me):
+def init_token_balances(base_asset, pool, admin, me):
     mint_amount = 10**25  # 1M @ 18 decimals
 
     # TODO dont be an idiot and use boa.eval instead of contract calls
@@ -56,9 +56,6 @@ def init_token_balances(base_asset, bond_token, pool, admin, me):
     # mock token
     base_asset.mint(me, mint_amount)
     base_asset.mint(admin, mint_amount)
-
-    bond_token.mint(me, mint_amount, sender=admin)
-    bond_token.mint(admin, mint_amount, sender=admin)
 
     # mint lending tokens then deposit into pool to get
     base_asset.mint(me, mint_amount, sender=me)

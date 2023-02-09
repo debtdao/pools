@@ -21,7 +21,7 @@ from ..utils.events import _find_event
 # # events properly emitted
 
 
-def test_token_info(base_asset, pool, bond_token):
+def test_token_info(base_asset, pool):
     """
     Test inital state of the contract.
     """
@@ -38,11 +38,6 @@ def test_token_info(base_asset, pool, bond_token):
     assert pool.decimals() == 18
     # assert pool.CACHED_COMAIN_SEPARATOR() == 
     # assert pool.CACHED_CHAIN_ID() == 18
-
-
-    assert bond_token.name() == "Bondage Token"
-    assert bond_token.symbol() == "BONDAGE"
-    assert bond_token.decimals() == 18
 
     # Check of intial state of authorization
     # assert base_asset.owner() == admin

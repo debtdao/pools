@@ -7,7 +7,6 @@
 @dev	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
 
 
-
 TODO - 
 6. implement _get_share_APR()
 10. Add performance fee to 4626 profits?
@@ -15,9 +14,9 @@ TODO -
 11. add separate var from total_assets called total_debt and use that instead.
 	Prevents lvg from fucking up share price. can incorporate debt into share price if we want
 8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
-1. Refactor yearn permit()  so args are exactly 2612 standard
+1. Refactor yearn permit() so args are exactly 2612 standard
 2. Add permit + permit2 IERC4626P extension and implement functions
-4. add dev: revert strings to all asserts
+4. add custom errors to all reverts
 2. add IERC4626RP (referral + permit)
 3. Make sure using appropriate instances of total_assets, total_deployed, liquid_assets, owned_assets, etc. in state updates and price algorithms
 7. add more events around share price updates and other internal components
