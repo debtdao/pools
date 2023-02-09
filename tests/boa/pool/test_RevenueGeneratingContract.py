@@ -433,7 +433,6 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, bond_toke
         pool.claim_rev(new_token, amount + 1, sender=boa.env.generate_address())
 
 
-
 @pytest.mark.pool
 @pytest.mark.rev_generator
 @pytest.mark.event_emissions

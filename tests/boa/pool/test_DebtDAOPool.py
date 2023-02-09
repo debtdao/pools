@@ -12,11 +12,12 @@ from ..utils.events import _find_event
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000"
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 MAX_PITANCE_FEE = 200 # 2% in bps
 FEE_COEFFICIENT = 10000 # 100% in bps
 SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
-
+VESTING_RATE_COEFFICIENT = 10**18
 # TODO Ask ChatGPT to generate test cases in vyper
 # 1. delegate priviliges on investment functions
 # 1. vault_investment goes up by _amount 
@@ -61,7 +62,7 @@ def test_assert_pool_constants(pool):
     assert pool.API_VERSION() == '0.0.001'  # dope that we can track contract version vs test for that version in source control
     # assert pool.DOMAIN_TYPE_HASH() == 0
     # assert pool.PERMIT_TYPE_HASH() == 0
-    assert pool.DEGRADATION_COEFFICIENT() == 1e18
+    assert pool.VESTING_RATE_COEFFICIENT() == 1e18
 
 def test_assert_initial_pool_state(pool, base_asset, admin):
     """
@@ -79,13 +80,167 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
     assert pool.pending_rev_recipient() == ZERO_ADDRESS
     assert pool.max_assets() == MAX_UINT
     # ensure profit logic is initialized properly
-    assert pool.locked_profit() == 0
+    assert pool.locked_profits() == 0
     assert pool.vesting_rate()== 46000000000000 # default eek
     assert pool.last_report() == pool.eval('block.timestamp')
     # ensure vault logic is initialized properly
     assert pool.totalSupply() == 0
     assert pool.total_assets()== 0
 
+
+############################################
+########                            ########
+########  Pool Owner Functionality  ########
+########                            ########
+############################################
+@pytest.mark.pool
+@pytest.mark.pool_owner
+def test_only_owner_can_set_max_asset(pool, admin, me):
+    assert pool.max_assets() == MAX_UINT
+    pool.set_max_assets(0, sender=admin)
+    assert pool.max_assets() == 0
+    pool.set_max_assets(0, sender=admin)
+    assert pool.max_assets() == 0
+    pool.set_max_assets(MAX_UINT, sender=admin)
+    assert pool.max_assets() == MAX_UINT
+    
+    # pool depositor cant set limit
+    with boa.reverts():
+        pool.set_max_assets(MAX_UINT, sender=me)
+    with boa.reverts():
+        pool.set_max_assets(0, sender=me)
+    with boa.reverts():
+        pool.set_max_assets(10*10**18, sender=me)
+
+    # rando cant set limit
+    rando = boa.env.generate_address()
+    with boa.reverts():
+        pool.set_max_assets(MAX_UINT, sender=rando)
+    with boa.reverts():
+        pool.set_max_assets(0, sender=rando)
+    with boa.reverts():
+        pool.set_max_assets(10*10**18, sender=rando)
+        
+@pytest.mark.pool
+@pytest.mark.pool_owner
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT - 1),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_fuzz_set_max_assets_amount(pool, base_asset, admin, me, amount):
+    assert pool.max_assets() == MAX_UINT
+    pool.set_max_assets(amount, sender=admin)
+    assert pool.max_assets() == amount
+
+    assert pool.total_assets() == 0 # ensure clean state
+    base_asset.mint(me, amount + 1, sender=me) # do + 1 to test max overflow
+    base_asset.approve(pool, amount + 1, sender=me)
+    pool.deposit(amount, me, sender=me) # up to limit should work
+
+    with boa.reverts():
+        pool.deposit(1, me, sender=me) # 1 over limit
+
+
+@pytest.mark.pool
+@pytest.mark.pool_owner
+def test_only_owner_can_set_min_deposit(pool, admin, me):
+    assert pool.min_deposit() == 0
+    pool.set_min_deposit(MAX_UINT, sender=admin)
+    assert pool.min_deposit() == MAX_UINT
+    pool.set_min_deposit(0, sender=admin)
+    assert pool.min_deposit() == 0
+    pool.set_min_deposit(10*10**18, sender=admin)
+    assert pool.min_deposit() == 10*10**18
+    
+    # pool depositor cant set limit
+    with boa.reverts():
+        pool.set_min_deposit(MAX_UINT, sender=me)
+    with boa.reverts():
+        pool.set_min_deposit(0, sender=me)
+    with boa.reverts():
+        pool.set_min_deposit(10*10**18, sender=me)
+
+    # rando cant set limit
+    rando = boa.env.generate_address()
+    with boa.reverts():
+        pool.set_min_deposit(MAX_UINT, sender=rando)
+    with boa.reverts():
+        pool.set_min_deposit(0, sender=rando)
+    with boa.reverts():
+        pool.set_min_deposit(10*10**18, sender=rando)
+        
+
+@pytest.mark.pool
+@pytest.mark.pool_owner
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT / 3),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_fuzz_set_min_deposit_amount(pool, base_asset, admin, me, amount):
+    assert pool.min_deposit() == 0
+    pool.set_min_deposit(amount, sender=admin)
+    assert pool.min_deposit() == amount
+
+    assert pool.total_assets() == 0 # ensure clean state
+    base_asset.mint(me, amount, sender=me) # do + 1 to test max overflow
+    base_asset.approve(pool, amount, sender=me)
+
+    with boa.reverts():
+        pool.deposit(amount - 1, me, sender=me) # under min fails
+
+    pool.deposit(amount, me, sender=me) # up to limit should work
+
+    base_asset.mint(me, amount * 2, sender=me) # do + 1 to test max overflow
+    base_asset.approve(pool, amount * 2, sender=me)
+    pool.deposit(amount * 2, me, sender=me) # over limit should work
+
+
+@pytest.mark.pool
+@pytest.mark.pool_owner
+def test_only_owner_can_set_vesting_rate(pool, admin, me):
+    assert pool.vesting_rate() == 46000000000000
+    pool.set_vesting_rate(VESTING_RATE_COEFFICIENT, sender=admin)
+    assert pool.vesting_rate() == VESTING_RATE_COEFFICIENT
+    pool.set_vesting_rate(0, sender=admin)
+    assert pool.vesting_rate() == 0
+    pool.set_vesting_rate(VESTING_RATE_COEFFICIENT - 10**10, sender=admin)
+    assert pool.vesting_rate() == VESTING_RATE_COEFFICIENT - 10**10
+    
+    # pool depositor cant set limit
+    with boa.reverts():
+        pool.set_vesting_rate(VESTING_RATE_COEFFICIENT, sender=me)
+    with boa.reverts():
+        pool.set_vesting_rate(0, sender=me)
+    with boa.reverts():
+        pool.set_vesting_rate(VESTING_RATE_COEFFICIENT - 10**10, sender=me)
+
+    # rando cant set limit
+    rando = boa.env.generate_address()
+    with boa.reverts():
+        pool.set_vesting_rate(VESTING_RATE_COEFFICIENT, sender=rando)
+    with boa.reverts():
+        pool.set_vesting_rate(0, sender=rando)
+    with boa.reverts():
+        pool.set_vesting_rate(VESTING_RATE_COEFFICIENT - 10**10, sender=rando)
+        
+
+@pytest.mark.pool
+@pytest.mark.pool_owner
+@given(amount=st.integers(min_value=1, max_value=10**18),) # max = DEGRADATAION_COEFFECIENT
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_fuzz_set_vesting_rate_amount(pool, base_asset, admin, me, amount):
+    assert pool.vesting_rate() == 46000000000000
+
+    if amount > VESTING_RATE_COEFFICIENT:
+        with boa.reverts():
+            pool.set_vesting_rate(amount, sender=admin)
+    else:
+        pool.set_vesting_rate(amount, sender=admin)
+        assert pool.vesting_rate() == amount
+    
+    # profit lock tests have their own section below in this file
+
+############################################%#
+########                              ########
+########  Revenue Generator EIP Impl  ########
+########                              ########
+############################################%#
 @pytest.mark.pool
 @pytest.mark.rev_generator
 @given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE),
@@ -148,7 +303,7 @@ def test_revenue_calculations_with_multiple_fees(
 
     base_asset.mint(admin, amount)
     base_asset.approve(pool, amount, sender=admin)
-    pool.deposit(admin, amount, sender=admin)
+    pool.deposit(amount, admin, sender=admin)
     [deposit_rev, referral_rev] = pool.get_logs()[0:1]
     assert deposit_rev.args_map['fee_type'] == 2
     assert deposit_rev.args_map['receiver'] == admin
@@ -332,3 +487,185 @@ def _is_pittance_fee(fee_name: str) -> bool:
     #             return False
     #         case _:
     #             return True
+
+
+########################################
+########################################
+########################################
+#####                               ####
+#####       Credit Investment       ####
+#####                               ####
+########################################
+########################################
+########################################
+@pytest.mark.pool
+@pytest.mark.pool_owner
+@pytest.mark.line_integration
+def test_only_pool_owner_can_invest(pool, mock_line, admin, me, base_asset, init_token_balances):
+    # init_token_balances auto deposits so we have funds available
+
+    # new 4626 vault to invest in
+    new_pool = boa.load("contracts/DebtDAOPool.vy", admin, base_asset, "New Pool", "NEW", [0,0,0,0,0,0])
+    with boa.reverts():
+        pool.invest_vault(new_pool, 1, sender=me)
+    pool.invest_vault(new_pool, 1, sender=admin)
+    
+    with boa.reverts():
+        pool.add_credit(mock_line, 0, 0, 1, sender=me)
+    id = pool.add_credit(mock_line, 0, 0, 1, sender=admin)
+    
+    with boa.reverts():
+        pool.increase_credit(mock_line, id, 1, sender=me)
+    with boa.reverts():
+        pool.set_rates(mock_line, id, 100, 100, sender=me)
+    pool.increase_credit(mock_line, id, 1, sender=admin)
+    pool.set_rates(mock_line, id, 100, 100, sender=admin)
+
+
+@pytest.mark.pool
+@pytest.mark.line_integration
+@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_pool_can_deposit_to_line(pool, mock_line, admin, me, base_asset, init_token_balances, amount):
+    start_balance = init_token_balances * 2
+    base_asset.mint(me, amount)
+    base_asset.approve(pool, amount, sender=me)
+    pool.deposit(amount, me , sender=me)
+
+    assert base_asset.balances(pool) == start_balance + amount
+    assert base_asset.balances(mock_line) == 0
+    
+    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
+
+    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
+
+    assert lender == pool.address
+    assert deposit == amount
+    assert token == base_asset.address
+    assert base_asset.balances(pool) == start_balance
+    assert base_asset.balances(mock_line) == amount
+
+
+@pytest.mark.pool
+@pytest.mark.line_integration
+@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_pool_can_increase_deposit_to_line(pool, mock_line, admin, me, base_asset, init_token_balances, amount):
+    start_balance = init_token_balances * 2
+    base_asset.mint(me, amount * 2)
+    base_asset.approve(pool, amount * 2, sender=me)
+    pool.deposit(amount * 2, me , sender=me)
+
+    assert base_asset.balances(pool) == start_balance + amount * 2
+    assert base_asset.balances(mock_line) == 0
+    
+    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
+
+    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
+
+    assert lender == pool.address
+    assert deposit == amount
+    assert token == base_asset.address
+    assert base_asset.balances(pool) == start_balance + amount
+    assert base_asset.balances(mock_line) == amount
+
+    pool.increase_credit(mock_line, id, amount, sender=admin)
+
+    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
+
+    assert lender == pool.address
+    assert deposit == amount * 2
+    assert token == base_asset.address
+    assert base_asset.balances(pool) == start_balance
+    assert base_asset.balances(mock_line) == amount * 2
+
+
+@pytest.mark.pool
+@pytest.mark.line_integration
+@given(drate=st.integers(min_value=1, max_value=10**10),
+        frate=st.integers(min_value=1, max_value=10**10),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_pool_can_change_rates_on_existing_position(pool, mock_line, admin, me, base_asset, drate, frate):
+    amount = 1
+    base_asset.mint(me, amount * 2)
+    base_asset.approve(pool, amount * 2, sender=me)
+    pool.deposit(amount * 2, me , sender=me)
+
+    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
+
+    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
+
+    # ensure proper position for id
+    assert lender == pool.address
+    assert token == base_asset.address
+    
+    [drate, frate, _] = mock_line.rates(id)
+    assert drate == 0 and frate == 0
+
+    pool.set_rates(mock_line, id, drate, frate, sender=admin)
+
+    [drate2, frate2, _] = mock_line.rates(id)
+    assert drate2 == drate and frate2 == frate
+
+    # can set back to 0
+    pool.set_rates(mock_line, id, 0, 0, sender=admin)
+
+    [drate2, frate2, _] = mock_line.rates(id)
+    assert drate2 == 0 and frate2 == 0
+
+@pytest.mark.pool
+@pytest.mark.line_integration
+@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_pool_can_change_rates_on_nonexistant_position(pool, mock_line, admin, me, base_asset, amount):
+    with boa.reverts(): # error from line contract gets bubbled to Pool
+        pool.set_rates(mock_line, id, 1_000, 100, sender=admin)
+
+
+
+############################################%#
+########                              ########
+########  Locked Profit Calculations  ########
+########                              ########
+############################################%#
+
+@pytest.mark.pool
+@pytest.mark.slow
+@given(total_profit=st.integers(min_value=10**18, max_value=MAX_UINT),
+        vesting_time=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT * 2),
+        vesting_rate=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_calling_unlock_profit_releases_all_available_profit(
+    pool, me, base_asset, total_profit, vesting_time, vesting_rate
+):  
+    base_asset.mint(pool, total_profit)
+    pool.eval(f"""
+        self.total_assets = {total_profit}
+        self.locked_profits = {total_profit}
+        self.vesting_rate = {vesting_rate}
+    """)
+    # last_report set at contract deployment in fixture so should be `now`
+
+    # nothing should change until we call unlock_profit
+    assert pool.locked_profits() == total_profit
+    # max liquid assets is 0 bc all locked
+    assert pool.maxFlashLoan(base_asset) == 0
+    
+    boa.env.time_travel(vesting_time)
+
+    locked_profit = 0
+    if vesting_time is 0 or vesting_rate is 0:
+        locked_profit = total_profit
+    elif vesting_time * vesting_rate >= VESTING_RATE_COEFFICIENT: # wrong condition. check vesting_rate vs coeeficient and time compared to that
+        locked_profit = 0
+    else:
+         locked_profit = math.floor(total_profit - math.floor(((total_profit * vesting_time * vesting_rate) / VESTING_RATE_COEFFICIENT)))
+
+    pool.unlock_profits()
+
+    assert pool.locked_profits() == locked_profit
+    # max liquid should include unlocked profits now
+    assert pool.maxFlashLoan(base_asset) == total_profit - locked_profit
+
+    
+    

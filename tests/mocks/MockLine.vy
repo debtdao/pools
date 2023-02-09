@@ -2,6 +2,7 @@
 from vyper.interfaces import ERC20 as IERC20
 
 interface ISecuredLine:
+    def borrower() -> address: pure
     def ids(index: uint256) -> bytes32: view
     def status() -> uint256: view
     def credits(id: bytes32) -> Position: view
@@ -51,12 +52,15 @@ BPS_COEFFICIENT: constant(uint256) = 10_000
 
 ids: public(uint256)
 status: public(uint256)
-credits: HashMap[bytes32, Position]
-rates: HashMap[bytes32, Rate]
+borrower: public(address)
+credits: public(HashMap[bytes32, Position])
+rates: public(HashMap[bytes32, Rate])
+
 
 @external
-def __init__():
+def __init__(_borrower: address):
     self.status = 1
+    self.borrower = _borrower
 
 @external
 def available(id: bytes32) -> (uint256, uint256): 
@@ -64,25 +68,26 @@ def available(id: bytes32) -> (uint256, uint256):
 
 @external
 def addCredit(
-    drate: uint128,
-    frate: uint128,
-    amount: uint256,
-    token: address,
-    lender: address,
+    _drate: uint128,
+    _frate: uint128,
+    _amount: uint256,
+    _token: address,
+    _lender: address,
 ) -> bytes32:
-    id: bytes32 = keccak256(_abi_encode(self, lender, token))
-    self._set_rates(id, drate, frate)
+    id: bytes32 = keccak256(_abi_encode(self, _lender, _token))
+    self._set_rates(id, _drate, _frate)
     self.credits[id] = Position({
-        deposit: amount,
+        deposit: _amount,
         principal: 0,
         interestAccrued: 0,
         interestRepaid: 0,
         decimals: 18,
-        token: token,
-        lender: lender,
+        token: _token,
+        lender: _lender,
         isOpen: True,
     })
 
+    IERC20(_token).transferFrom(_lender, self, _amount)
     
     return id
 
