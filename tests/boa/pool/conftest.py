@@ -9,6 +9,10 @@ def borrower():
     return boa.env.generate_address()
 
 @pytest.fixture(scope="session")
+def mock_line(borrower):
+    return boa.load("tests/mocks/MockLine.vy", borrower)
+
+@pytest.fixture(scope="session")
 def pool_roles():
     return ['owner', 'rev_recipient']
 
@@ -28,6 +32,9 @@ def pool_fee_types():
 @pytest.fixture(scope="session")
 def pittance_fee_types(pool_fee_types):
     return pool_fee_types[1:] # cut performance and snitch fees of ends
+
+
+
 
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):

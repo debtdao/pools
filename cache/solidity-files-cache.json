@@ -2472,10 +2472,10 @@
         }
       }
     },
-    "tests/foundry/PoolDelegateTest.sol": {
-      "lastModificationDate": 1675882635504,
+    "tests/foundry/PoolDelegateTest.t.sol": {
+      "lastModificationDate": 1676310358814,
       "contentHash": "2a12332ba18d339d0c5e8f888ad489b6",
-      "sourceName": "tests/foundry/PoolDelegateTest.sol",
+      "sourceName": "tests/foundry/PoolDelegateTest.t.sol",
       "solcConfig": {
         "settings": {
           "optimizer": {
@@ -2565,17 +2565,17 @@
       "versionRequirement": "=0.8.16",
       "artifacts": {
         "Events": {
-          "0.8.16+commit.07a7930e.Darwin.appleclang": "PoolDelegateTest.sol/Events.json"
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "PoolDelegateTest.t.sol/Events.json"
         },
         "PoolDelegateTest": {
-          "0.8.16+commit.07a7930e.Darwin.appleclang": "PoolDelegateTest.sol/PoolDelegateTest.json"
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "PoolDelegateTest.t.sol/PoolDelegateTest.json"
         }
       }
     },
-    "tests/foundry/SimpleVyperTest.sol": {
-      "lastModificationDate": 1675711568218,
+    "tests/foundry/SimpleVyperTest.t.sol": {
+      "lastModificationDate": 1676310358814,
       "contentHash": "8c9c06fab0550ba2a5ef31ac7d612e55",
-      "sourceName": "tests/foundry/SimpleVyperTest.sol",
+      "sourceName": "tests/foundry/SimpleVyperTest.t.sol",
       "solcConfig": {
         "settings": {
           "optimizer": {
@@ -2627,7 +2627,7 @@
       "versionRequirement": "=0.8.16",
       "artifacts": {
         "SimpleVyperTest": {
-          "0.8.16+commit.07a7930e.Darwin.appleclang": "SimpleVyperTest.sol/SimpleVyperTest.json"
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "SimpleVyperTest.t.sol/SimpleVyperTest.json"
         }
       }
     },

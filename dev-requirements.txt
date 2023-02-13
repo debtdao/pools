@@ -8,4 +8,7 @@ jedi
 pytest-xdist
 pytest-forked
 vyper==0.3.7
+# track nightly vyper releases (need for raw_revert so we can use custom errors)
+# Latest releases of vyper and boa are usually incompatible
+# git+https://github.com/vyperlang/vyper.git
 ipython

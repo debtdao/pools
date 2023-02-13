@@ -7,7 +7,6 @@
 @dev	All investment decisions and pool paramters are controlled by the pool owner aka "Delegate"
 
 
-
 TODO - 
 6. implement _get_share_APR()
 10. Add performance fee to 4626 profits?
@@ -15,9 +14,9 @@ TODO -
 11. add separate var from total_assets called total_debt and use that instead.
 	Prevents lvg from fucking up share price. can incorporate debt into share price if we want
 8. should we call _unlock_profits on - deposit, withdraw, invest, divest?
-1. Refactor yearn permit()  so args are exactly 2612 standard
+1. Refactor yearn permit() so args are exactly 2612 standard
 2. Add permit + permit2 IERC4626P extension and implement functions
-4. add dev: revert strings to all asserts
+4. add custom errors to all reverts
 2. add IERC4626RP (referral + permit)
 3. Make sure using appropriate instances of total_assets, total_deployed, liquid_assets, owned_assets, etc. in state updates and price algorithms
 7. add more events around share price updates and other internal components
@@ -43,7 +42,7 @@ interface IDebtDAOPool:
 	# investments
 	def unlock_profits() -> uint256: nonpayable
 	def collect_interest(line: address, id: bytes32) -> uint256: nonpayable
-	def increase_credit( line: address, id: bytes32, amount: uint256): nonpayable
+	def increase_credit(_line: address, _id: bytes32, _amount: uint256): nonpayable
 	def set_rates( line: address, id: bytes32, drate: uint128, frate: uint128): nonpayable
 	def add_credit( line: address, drate: uint128, frate: uint128, amount: uint256) -> bytes32: nonpayable
 
@@ -59,7 +58,7 @@ interface IDebtDAOPool:
 	# Pool Admin
 	def set_max_assets(new_max: uint256) -> bool: nonpayable
 	def set_min_deposit(new_min: uint256) -> bool: nonpayable
-	def set_profit_degredation(vesting_rate: uint256): nonpayable
+	def set_vesting_rate(vesting_rate: uint256): nonpayable
 
 	# fees
 	def set_performance_fee(fee: uint16) -> bool: nonpayable
@@ -74,7 +73,7 @@ interface IDebtDAOPool:
 ### TODO only making public for testing purposes. ideally could remain private but still have easy access from tests
 
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
-FEE_COEFFICIENT: public(constant(uint16)) = 10000
+FEE_COEFFICIENT: public(constant(uint256)) = 10000
 # @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
 # IF owner fees exist when snitched on. Pool depositors are *guaranteed* to see a price increase, hence heavy incentive to snitches.
 SNITCH_FEE: public(constant(uint16)) = 3000
@@ -88,9 +87,9 @@ API_VERSION: public(constant(String[7])) = "0.0.001"
 DOMAIN_TYPE_HASH: public(constant(bytes32)) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 # @notice EIP712 permit type hash
 PERMIT_TYPE_HASH: public(constant(bytes32)) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
-# TODO rename DEGRADATION_COEFFICIENT
-# rate per block of profit degradation. DEGRADATION_COEFFICIENT is 100% per block
-DEGRADATION_COEFFICIENT: public(constant(uint256)) = 10 ** 18
+# TODO rename VESTING_RATE_COEFFICIENT
+# rate per block of profit degradation. VESTING_RATE_COEFFICIENT is 100% per block
+VESTING_RATE_COEFFICIENT: public(constant(uint256)) = 10 ** 18
 
 # IERC20 vars
 NAME: public(immutable(String[50]))
@@ -112,9 +111,9 @@ total_assets: public(uint256)
 # share price logic stolen from yearn vyper vaults
 # vars - https://github.com/yearn/yearn-vaults/blob/74364b2c33bd0ee009ece975c157f065b592eeaf/contracts/Vault.vy#L239-L242
 last_report: public(uint256) 	# block.timestamp of last report
-locked_profit: public(uint256) 	# how much profit is locked and cant be withdrawn
+locked_profits: public(uint256) 	# how much profit is locked and cant be withdrawn
 # lower the coefficient the slower the profit drip
-vesting_rate: public(uint256) # The rate of degradation in percent per second scaled to 1e18.  DEGRADATION_COEFFICIENT is 100% per block
+vesting_rate: public(uint256) # The rate of degradation in percent per second scaled to 1e18.  VESTING_RATE_COEFFICIENT is 100% per block
 
 # IERC2612 Variables
 nonces: public(HashMap[address, uint256])
@@ -227,11 +226,11 @@ def __init__(
 	ASSET = _asset
 
 	# NOTE: Yearn - set profit to be distributed every 6 hours
-	# self.vesting_rate = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
+	# self.vesting_rate = convert(VESTING_RATE_COEFFICIENT * 46 / 10 ** 6 , uint256)
 
 	# TODO: Debt DAO - set profit to bedistributed to every `1 eek` (ethereum week)
 	# 2048 epochs = 2048 blocks = COEFFICIENT / 2048 / 10 ** 6 ???
-	self.vesting_rate = convert(DEGRADATION_COEFFICIENT * 46 / 10 ** 6 , uint256)
+	self.vesting_rate = convert(VESTING_RATE_COEFFICIENT * 46 / 10 ** 6 , uint256)
 	self.last_report = block.timestamp
 
 	# IERC2612
@@ -242,14 +241,14 @@ def __init__(
 ### Investing functions
 
 @internal
-def _assert_delegate_has_available_funds(amount: uint256):
+def _assert_owner_has_available_funds(amount: uint256):
 	assert msg.sender == self.owner, "not owner"
 	assert self.total_assets - self.total_deployed >= amount
 
 @external
 @nonreentrant("lock")
 def add_credit(_line: address, _drate: uint128, _frate: uint128, _amount: uint256) -> bytes32:
-	self._assert_delegate_has_available_funds(_amount)
+	self._assert_owner_has_available_funds(_amount)
 	 # prevent delegate confusion btw this add_credit and accept_offer which also call SecuredLine.addCredit()
 	assert ISecuredLine(_line).borrower() != self
 	
@@ -259,86 +258,82 @@ def add_credit(_line: address, _drate: uint128, _frate: uint128, _amount: uint25
 	IERC20(ASSET).approve(_line, _amount)
 	
 	# NOTE: no need to log, Line emits events already
+	IERC20(ASSET).approve(_line, _amount)
 	return ISecuredLine(_line).addCredit(_drate, _frate, _amount, ASSET, self)
 
 @external
 @nonreentrant("lock")
 def increase_credit(_line: address, _id: bytes32, _amount: uint256):
-	assert _id != empty(bytes32)
-	assert _line != empty(address)
-	self._assert_delegate_has_available_funds(_amount)
+	self._assert_owner_has_available_funds(_amount)
 
 	self.total_deployed += _amount
 
-	# approve the transfer of assets from the pool to the line
-	IERC20(ASSET).approve(_line, _amount)
-
 	# NOTE: no need to log, Line emits events already
+	IERC20(ASSET).approve(_line, _amount)
 	ISecuredLine(_line).increaseCredit(_id, _amount)
-	# log test_event("random")
 
 @external
-def set_rates(line: address, id: bytes32, drate: uint128, frate: uint128):
+def set_rates(_line: address, _id: bytes32, drate: uint128, frate: uint128):
 	assert msg.sender == self.owner, "not owner"
 	# NOTE: no need to log, Line emits events already
-	ISecuredLine(line).setRates(id, drate, frate)
+	ISecuredLine(_line).setRates(_id, drate, frate)
 
 @external
 @nonreentrant("lock")
-def collect_interest(line: address, id: bytes32) -> uint256:
+def collect_interest(_line: address, _id: bytes32) -> uint256:
 	"""
 	@notice
 		Anyone can claim interest from active lines and start vesting profits into pool shares
 	@return
 		Amount of assets earned in Debt DAO Line of Credit contract
 	"""
-	return self._reduce_credit(line, id, 0)[1]
+	return self._reduce_credit(_line, _id, 0)[1]
 
 @external
 @nonreentrant("lock")
-def abort(line: address, id: bytes32) -> (uint256, uint256):
+def abort(_line: address, _id: bytes32) -> (uint256, uint256):
 	"""
-	@notice emergency cord to remove all avialable funds from a line (deposit + interestRepaid)
+	@notice emergency cord to remove all avialable funds from a _line (deposit + interestRepaid)
 	"""
 	assert msg.sender == self.owner, "not owner"
-	return self._reduce_credit(line, id, max_value(uint256))
+	return self._reduce_credit(_line, _id, max_value(uint256))
 
 @external
 @nonreentrant("lock")
-def reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uint256):
+def reduce_credit(_line: address, _id: bytes32, amount: uint256) -> (uint256, uint256):
 	assert msg.sender == self.owner, "not owner"
-	return self._reduce_credit(line, id, amount)
+	return self._reduce_credit(_line, _id, amount)
 
 @external
 @nonreentrant("lock")
-def use_and_repay(line: address, repay: uint256, withdraw: uint256) -> (uint256, uint256):
+def use_and_repay(_line: address, repay: uint256, withdraw: uint256) -> (uint256, uint256):
 	assert msg.sender == self.owner, "not owner"
 
 	# Assume we are next lender in queue. 
 	# save id for later incase we repay full amount and stepQ
-	id: bytes32 = ISecuredLine(line).ids(0)
+	id: bytes32 = ISecuredLine(_line).ids(0)
 
 	# NOTE: no need to log, Line emits events already
-	assert ISecuredLine(line).useAndRepay(repay)
+	assert ISecuredLine(_line).useAndRepay(repay)
 
-	return self._reduce_credit(line, id, withdraw)
+	return self._reduce_credit(_line, id, withdraw)
 
 @external
 @nonreentrant("lock")
-def impair(line: address, id: bytes32) -> (uint256, uint256):
+def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 	"""
 	@notice     - markdown the value of an insolvent loan reducing vault share price over time
 				- Callable by anyone to prevent delegate from preventing numba go down
-	@param line - line of credit contract to call
-	@param id   - credit position on line controlled by this pool 
+	@param _line - _line of credit contract to call
+	@param _id   - credit position on _line controlled by this pool 
 	"""
-	assert ISecuredLine(line).status() == LINE_STATUS.INSOLVENT
+	assert ISecuredLine(_line).status() == LINE_STATUS.INSOLVENT
 
-	position: Position = ISecuredLine(line).credits(id)
+	position: Position = ISecuredLine(_line).credits(_id)
 
 	recoverable: uint256 = position.deposit - position.principal
 
-	ISecuredLine(line).withdraw(id, recoverable + position.interestRepaid) # claim all funds left in line
+	ISecuredLine(_line).withdraw(_id, recoverable + position.interestRepaid) # claim all funds left in line
 
 	# snapshot APR before updating share prices
 	old_apr: int256 = self._get_share_APR()
@@ -359,7 +354,7 @@ def impair(line: address, id: bytes32) -> (uint256, uint256):
 		# NOTE: no need to log, Line emits events already
 		# NOTE: Delegate abdicates right to performance fee on impairment
 
-	log Impair(id, recoverable, position.principal, old_apr, self._get_share_APR(), share_price, fees_burned)
+	log Impair(_id, recoverable, position.principal, old_apr, self._get_share_APR(), share_price, fees_burned)
 
 	return (recoverable, position.principal)
 
@@ -368,12 +363,13 @@ def impair(line: address, id: bytes32) -> (uint256, uint256):
 @external
 @nonreentrant("lock")
 def invest_vault(_vault: address, _amount: uint256) -> uint256:
-	self._assert_delegate_has_available_funds(_amount)
+	self._assert_owner_has_available_funds(_amount)
 
 	self.total_deployed += _amount
 	self.vault_investments[_vault] += _amount
 
-	# NOTE: Delegate should check previewDeposit(`_amount`) expected vs `_amount` for slippage ?
+	# NOTE: Owner should check previewDeposit(`_amount`) expected vs `_amount` for slippage ?
+	IERC20(ASSET).approve(_vault, _amount)
 	shares: uint256 = IERC4626(_vault).deposit(_amount, self)
 
 	log InvestVault(_vault, _amount, shares) ## TODO shares
@@ -468,17 +464,17 @@ def set_max_assets(new_max: uint256)  -> bool:
 ### Manage Pool Fees
 
 @internal
-def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES) -> bool:
+def _assert_max_fee(_fee: uint16, _fee_type: FEE_TYPES):
   assert msg.sender == self.owner, "not owner"
-  assert _fee <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
+  assert convert(_fee, uint256) <= FEE_COEFFICIENT, "bad performance _fee" # max 100% performance _fee
   log FeeSet(_fee, convert(_fee_type, uint256))
-  return True
 
 @external
 @nonreentrant("lock")
 def set_performance_fee(_fee: uint16) -> bool:
+  self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
   self.fees.performance = _fee
-  return self._assert_max_fee(_fee, FEE_TYPES.PERFORMANCE)
+  return True
 
 @internal
 def _assert_pittance_fee(_fee: uint16, fee_type: FEE_TYPES):
@@ -574,7 +570,7 @@ def claim_rev(_token: address, _amount: uint256) -> bool:
 
 @external
 @nonreentrant("lock")
-def set_profit_degredation(_vesting_rate: uint256):
+def set_vesting_rate(_vesting_rate: uint256):
 	"""
 	@notice
 		Changes the locked profit _vesting_rate.
@@ -582,7 +578,7 @@ def set_profit_degredation(_vesting_rate: uint256):
 	"""
 	assert msg.sender == self.owner, "not owner"
 	# Since "_vesting_rate" is of type uint256 it can never be less than zero
-	assert _vesting_rate <= DEGRADATION_COEFFICIENT
+	assert _vesting_rate <= VESTING_RATE_COEFFICIENT
 	self.vesting_rate = _vesting_rate
 	log UpdateProfitDegredation(_vesting_rate) 
 
@@ -597,7 +593,7 @@ def set_profit_degredation(_vesting_rate: uint256):
 
 @external
 @nonreentrant("lock")
-def accept_offer(_line: address, _drate: uint128, _frate: uint128, _amount: uint256) -> bytes32:
+def get_credit(_line: address, _drate: uint128, _frate: uint128, _amount: uint256) -> bytes32:
 	 # ensure can only call on Lines where we are borrower
 	assert ISecuredLine(_line).borrower() == self
 	
@@ -637,12 +633,12 @@ def repay_debt(_line: address, _amount: uint256):
 	TODO should we more tightly integrate LoC in? I like having it loosely coupled, makes it kinda automagic
 		 also adds security risk but less than giving full control of ur asset to Delegate
 	"""	
-	assert msg.sender == self.owner
+	self._assert_owner_has_available_funds(_amount)
 	assert self == ISecuredLine(_line).borrower()
 	assert LINE_STATUS.ACTIVE == ISecuredLine(_line).status()
 
 	IERC20(ASSET).approve(_line, _amount)
-	assert ISecuredLine(_line).depositAndRepay(_amount)
+	ISecuredLine(_line).depositAndRepay(_amount)
 
 	self.total_assets -= _amount
 	# TODO TEST is this the only accounting we need to do? how do we know this isnt conflicting with self.total_assets?
@@ -652,18 +648,20 @@ def repay_debt(_line: address, _amount: uint256):
 @external
 @nonreentrant("lock")
 def emergency_repay(_line: address, _amount: uint256):
+	self._assert_owner_has_available_funds(_amount)
 	assert self == ISecuredLine(_line).borrower()
 	status: LINE_STATUS = ISecuredLine(_line).status()
 	assert LINE_STATUS.LIQUIDATABLE == status or LINE_STATUS.INSOLVENT == status
 	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
-	assert _amount <= self._get_max_liquid_assets()
+
 	# force debt repayment and payout snitch fee if applicable
 	# normally we dont comingle depositor vs debt assets but in the case of default lenders get priority over depositors
 	# Delegate is responsible for making timely payments from available debt to avoid emergency_repay situation
 	self._update_shares(_amount, True)
 	self.debt_principal -= _amount
-	assert IERC20(ASSET).approve(_line, _amount) # debt/repayment can only be in base asset
-	assert ISecuredLine(_line).depositAndRepay(_amount)
+	# TODO this doesnt account for interest payments. Maybe we track debt to individual lines like we do vaults and do more math.
+	IERC20(ASSET).approve(_line, _amount) # debt/repayment can only be in base asset
+	ISecuredLine(_line).depositAndRepay(_amount)
 
 ####################################
 ####################################
@@ -827,6 +825,7 @@ def _erc20_safe_transfer(_token: address, _receiver: address, _amount: uint256):
 	)
 	if len(response) > 0:
 		assert convert(response, bool), "Transfer failed!"
+		# raw_revert(method_id("TransferFailed"))
 
 
 # 4626 + Pool internal functions
@@ -854,6 +853,18 @@ def _burn(owner: address, _shares: uint256, _assets: uint256) -> bool:
 	self._transfer(owner, empty(address), _shares)
 	return True
 
+
+@internal
+@pure
+def _calc_fee(shares: uint256, fee: uint16) -> uint256:
+	"""
+	@dev	does NOT emit `log RevenueGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
+	"""
+	if fee == 0:
+		return 0
+	else:
+		return (shares * convert(fee, uint256)) / FEE_COEFFICIENT
+
 @internal
 def _calc_and_mint_fee(
 	payer: address,
@@ -878,20 +889,8 @@ def _calc_and_mint_fee(
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
 	log RevenueGenerated(payer, self, fees, shares, convert(fee_type, uint256), to)
-
+	
 	return fees
-
-
-@internal
-@pure
-def _calc_fee(shares: uint256, fee: uint16) -> uint256:
-	"""
-	@dev	does NOT emit `log RevenueGenerated` like _mint_and_calc. Must manuualy log if using this function whil changing state
-	"""
-	if fee == 0:
-		return 0
-	else:
-		return (shares * convert(fee, uint256)) / convert(FEE_COEFFICIENT, uint256)
 
 @internal 
 def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
@@ -915,7 +914,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 	principal: uint256 = self.vault_investments[_vault] # MAY be a 0 but thats OK 👍
 
 	if principal == 0 and curr_shares == 0: # nothing to withdraw
-		return (is_loss, net) # technically no profit. 0 is cheaper to check too.
+		return (False, net) # technically no profit. 0 is cheaper to check too.
 
 	amount: uint256 = _amount
 	if _amount == 0:
@@ -993,7 +992,7 @@ def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uin
 		fees: uint256 = self._take_performance_fee(interest)
 
 	# NOTE: no need to log, Line emits events already
-	assert ISecuredLine(line).withdraw(id, withdrawable)
+	ISecuredLine(line).withdraw(id, withdrawable)
 
 	return (deposit, interest)
 
@@ -1040,10 +1039,15 @@ def _deposit(
 	shares: uint256 = _assets / share_price
 
 	# call even if fees = 0 to log revenue for prod analytics
-	self._calc_and_mint_fee(_receiver, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
-	# call even if fees = 0 to log revenue for prod analytics
+	self._calc_and_mint_fee(self, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
+	
+	# dont mint referral fees if depositor isnt being referred by 3rd party
+	shares_referred: uint256 = 0
 	if _referrer != empty(address):
-		self._calc_and_mint_fee(_receiver, _referrer, shares, self.fees.referral, FEE_TYPES.REFERRAL)
+		shares_referred = shares
+
+	# call even if fees = 0 to log revenue for prod analytics
+	self._calc_and_mint_fee(self, _referrer, shares_referred, self.fees.referral, FEE_TYPES.REFERRAL)
 
 	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
 
@@ -1104,7 +1108,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 		self._unlock_profits()
 
 		self.total_assets += _assets
-		self.locked_profit += _assets
+		self.locked_profits += _assets
 		# Profit is locked and gradually released per block
 
 		return (_assets, 0) # TODO return change in APR
@@ -1140,9 +1144,9 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 
 			# reduce APR but keep share price stable if possible
 			if locked_profit_before_loss >= pool_assets_lost: 
-				self.locked_profit = locked_profit_before_loss - pool_assets_lost
+				self.locked_profits = locked_profit_before_loss - pool_assets_lost
 			else:
-				self.locked_profit = 0
+				self.locked_profits = 0
 
 			# delegate fees not enough to eat losses. Socialize the plebs
 			# Auto dump so share price immediately falls (prevent bankrun with negative APYs)
@@ -1162,9 +1166,9 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 @nonreentrant("price_update")
 def _unlock_profits() -> uint256:
 	locked_profit: uint256 = self._calc_locked_profit()
-	vested_profits: uint256 = self.locked_profit - locked_profit
+	vested_profits: uint256 = self.locked_profits - locked_profit
 	
-	self.locked_profit -= vested_profits
+	self.locked_profits -= vested_profits
 	self.last_report = block.timestamp
 
 	log UnlockProfits(vested_profits, locked_profit, self.vesting_rate)
@@ -1201,12 +1205,12 @@ def _get_share_APR() -> int256:
 def _calc_locked_profit() -> uint256:
 	pct_profit_locked: uint256 = (block.timestamp - self.last_report) * self.vesting_rate
 
-	if(pct_profit_locked < DEGRADATION_COEFFICIENT):
-		locked_profit: uint256 = self.locked_profit
+	if(pct_profit_locked < VESTING_RATE_COEFFICIENT):
+		locked_profit: uint256 = self.locked_profits
 		return locked_profit - (
 				pct_profit_locked
 				* locked_profit
-				/ DEGRADATION_COEFFICIENT
+				/ VESTING_RATE_COEFFICIENT
 			)
 	else:        
 		return 0
@@ -1583,7 +1587,7 @@ def free_profit() -> uint256:
 	@notice
 		Amount of profit that can currently be vested into pool share price
 	"""
-	return self.locked_profit - self._calc_locked_profit()
+	return self.locked_profits - self._calc_locked_profit()
 
 
 @view
@@ -1788,13 +1792,13 @@ interface ISecuredLine:
 
 	# self-repay
 	def useAndRepay(amount: uint256) -> bool: nonpayable
-	def depositAndRepay(amount: uint256) -> bool: nonpayable
+	def depositAndRepay(amount: uint256): nonpayable
 
 	# divest
-	def withdraw(id: bytes32,  amount: uint256) -> bool: nonpayable
+	def withdraw(id: bytes32,  amount: uint256): nonpayable
 
 	# leverage
-	def borrow(id: bytes32,  amount: uint256) -> bool: nonpayable
+	def borrow(id: bytes32,  amount: uint256): nonpayable
 
 ### Events
 

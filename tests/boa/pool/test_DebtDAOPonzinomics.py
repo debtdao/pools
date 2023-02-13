@@ -1,5 +1,6 @@
 
 # Debt DAO Ponzinomics Test
+
 # 1. pool MUST borrow from line where they are borrower
 # ??y/n?? pool MUST NOT be able to post collateral to loans
 # 1. 

@@ -18,6 +18,7 @@ MAX_PITTANCE_FEE = 200 # 2% in bps
 # TEST all 4626 unit tests on preview functions. then compare preview func to actual action func 
 # (only diff between preview and action is side effects - state and events 
 
+@pytest.mark.token_4626
 def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     """
     Test share price before and after first person enters the pool
@@ -32,13 +33,12 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     assert pool.balanceOf(admin) == init_token_balances
     assert pool.balanceOf(me) == init_token_balances
 
-
+@pytest.mark.token_4626
 @given(amount=st.integers(min_value=0, max_value=10**25),
         # total pool assets/shares to manipulate share price
         assets=st.integers(min_value=0, max_value=10**25),
         shares=st.integers(min_value=0, max_value=10**25),
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
-# TODO add fuzzing for deposit fee and share price
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_deposit(pool, base_asset, me, admin, init_token_balances,
                 amount, assets, shares, deposit_fee):
@@ -98,7 +98,33 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     # expected_total_supply = shares + shares_created + fees_generated
     # _assert_uint_with_rounding(pool.totalSupply(), expected_total_supply)
 
+@pytest.mark.token_4626
+@given(amount=st.integers(min_value=0, max_value=MAX_UINT),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_deposit_cant_cause_total_asset_overflow(pool, base_asset, me, admin, init_token_balances, amount):
+    init_pool_deposits = init_token_balances * 2
+    max_avail = min(amount, MAX_UINT - init_pool_deposits)
+    
+    assert pool.total_assets() == init_pool_deposits # ensure clean state
+    base_asset.mint(me, max_avail, sender=me) # do + 1 to test max overflow
+    base_asset.approve(pool, max_avail, sender=me)
+    pool.deposit(max_avail, me, sender=me)
+    assert pool.total_assets() == init_pool_deposits + max_avail # ensure clean state
 
+    overflow_amnt = MAX_UINT - max_avail
+    
+    with boa.reverts():
+        # cant exceed max_uint before we even populate tx
+        # TODO test python/eth_abi reverts not boa
+        base_asset.mint(me, overflow_amnt, sender=me) # do + 1 to test max overflow
+        base_asset.approve(pool, overflow_amnt, sender=me)
+
+    
+    with boa.reverts():
+        # deposit fails bc we cant approve required amount
+        # TODO TEST is only important here, need to check that unchecked math or something
+        # doesnt fuck up in our contract, regardless of base_asset logic
+        pool.deposit(overflow_amnt, me, sender=me)
 
 # preview functions - right share price return value
 # preview functions - proper fees calculated
