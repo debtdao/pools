@@ -1916,8 +1916,8 @@
       }
     },
     "lib/forge-std/src/StdChains.sol": {
-      "lastModificationDate": 1675361043076,
-      "contentHash": "7e81ca873875f24995d81df8ccb66381",
+      "lastModificationDate": 1676309788132,
+      "contentHash": "f73fef006f384b898c755b0e404b84a2",
       "sourceName": "lib/forge-std/src/StdChains.sol",
       "solcConfig": {
         "settings": {
@@ -2043,9 +2043,49 @@
         }
       }
     },
+    "lib/forge-std/src/StdInvariant.sol": {
+      "lastModificationDate": 1676309788132,
+      "contentHash": "12c06010ec43ce935ed209d5aca30828",
+      "sourceName": "lib/forge-std/src/StdInvariant.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [],
+      "versionRequirement": ">=0.6.2, <0.9.0",
+      "artifacts": {
+        "StdInvariant": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "StdInvariant.sol/StdInvariant.json"
+        }
+      }
+    },
     "lib/forge-std/src/StdJson.sol": {
-      "lastModificationDate": 1673987738035,
-      "contentHash": "016de2d7ee55960094cc97ec792025bb",
+      "lastModificationDate": 1676309788133,
+      "contentHash": "2e1d13674e152408867795362d833c24",
       "sourceName": "lib/forge-std/src/StdJson.sol",
       "solcConfig": {
         "settings": {
@@ -2214,8 +2254,8 @@
       }
     },
     "lib/forge-std/src/Test.sol": {
-      "lastModificationDate": 1673987738035,
-      "contentHash": "9ca73393dbc2f8cde2aa628f8d05c5d5",
+      "lastModificationDate": 1676309788133,
+      "contentHash": "095f745449cb5b6ff27a2e53892b648f",
       "sourceName": "lib/forge-std/src/Test.sol",
       "solcConfig": {
         "settings": {
@@ -2252,6 +2292,7 @@
         "lib/forge-std/src/StdChains.sol",
         "lib/forge-std/src/StdCheats.sol",
         "lib/forge-std/src/StdError.sol",
+        "lib/forge-std/src/StdInvariant.sol",
         "lib/forge-std/src/StdJson.sol",
         "lib/forge-std/src/StdMath.sol",
         "lib/forge-std/src/StdStorage.sol",
@@ -2507,6 +2548,7 @@
         "lib/forge-std/src/StdChains.sol",
         "lib/forge-std/src/StdCheats.sol",
         "lib/forge-std/src/StdError.sol",
+        "lib/forge-std/src/StdInvariant.sol",
         "lib/forge-std/src/StdJson.sol",
         "lib/forge-std/src/StdMath.sol",
         "lib/forge-std/src/StdStorage.sol",
@@ -2569,6 +2611,7 @@
         "lib/forge-std/src/StdChains.sol",
         "lib/forge-std/src/StdCheats.sol",
         "lib/forge-std/src/StdError.sol",
+        "lib/forge-std/src/StdInvariant.sol",
         "lib/forge-std/src/StdJson.sol",
         "lib/forge-std/src/StdMath.sol",
         "lib/forge-std/src/StdStorage.sol",
