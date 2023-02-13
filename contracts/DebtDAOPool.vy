@@ -243,7 +243,7 @@ def __init__(
 @internal
 def _assert_owner_has_available_funds(amount: uint256):
 	assert msg.sender == self.owner, "not owner"
-	assert self.total_assets - self.total_deployed >= amount
+	assert self.total_assets - self.total_deployed >= amount, "insufficient funds"
 
 @external
 @nonreentrant("lock")

@@ -154,9 +154,9 @@ contract PoolDelegateTest is Test, Events {
     }
     function test_can_add_credit_and_increase_credit() public {
 
-        _usersDepositIntoPool();
+        _usersDepositIntoPool(150 ether);
 
-        bytes32 id = _addCredit();
+        bytes32 id = _addCredit(200 ether);
 
         vm.warp(block.timestamp + 30 days);
         vm.startPrank(borrower);
@@ -167,6 +167,16 @@ contract PoolDelegateTest is Test, Events {
         pool.increase_credit(address(line), id, 1 ether);
         vm.stopPrank();
 
+    }
+
+    function test_cannot_add_credit_without_sufficient_funds() public {
+
+        _usersDepositIntoPool(1 ether);
+        bytes32 id = _addCredit(2 ether);
+        vm.startPrank(delegate);
+        vm.expectRevert(bytes("insufficient funds"));
+        pool.increase_credit(address(line), id, 10 ether);
+        vm.stopPrank();
     }
 
     function test_non_pool_line() public {
@@ -191,29 +201,38 @@ contract PoolDelegateTest is Test, Events {
     }
 
     function test_can_set_rates() public {
-        _usersDepositIntoPool();
-        bytes32 id = _addCredit();
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
 
         vm.startPrank(delegate);
         pool.set_rates(address(line), id, 500,500);
         vm.stopPrank();
     }
     
+    function test_cannot_set_rates_as_pleb() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        vm.startPrank(makeAddr("pleb"));
+        vm.expectRevert(bytes("not owner"));
+        pool.set_rates(address(line), id, 500,500);
+        vm.stopPrank();
+    }
     // =================== INTERNAL HELPERS
 
-    function _usersDepositIntoPool() internal {
+    function _usersDepositIntoPool(uint256 amt) internal {
  
-        iTokenA.mint(userA, 150 ether);
-        iTokenA.mint(userB, 150 ether);
+        iTokenA.mint(userA, amt);
+        iTokenA.mint(userB, amt);
 
         vm.startPrank(userA);
-        iTokenA.approve(address(pool), 150 ether);
-        pool.deposit(150 ether, userA); // depositer will receive the pool tokens
+        iTokenA.approve(address(pool), amt);
+        pool.deposit(amt, userA); // depositer will receive the pool tokens
         vm.stopPrank();
 
         vm.startPrank(userB);
-        iTokenA.approve(address(pool), 150 ether);
-        pool.deposit(150 ether, userB); // depositer will receive the pool tokens
+        iTokenA.approve(address(pool), amt);
+        pool.deposit(amt, userB); // depositer will receive the pool tokens
         vm.stopPrank();
     }
 
@@ -251,15 +270,15 @@ contract PoolDelegateTest is Test, Events {
         vm.stopPrank();
     }
 
-    function _addCredit() internal returns (bytes32 id){
+    function _addCredit(uint256 amt) internal returns (bytes32 id){
         vm.startPrank(delegate);
         vm.expectEmit(false, false, false, false);
         emit MutualConsentRegistered(bytes32(0), borrower);
-        pool.add_credit(address(line), 1000, 1000, 200 ether);
+        pool.add_credit(address(line), 1000, 1000, amt);
         vm.stopPrank();
 
         vm.startPrank(borrower);
-        id = line.addCredit(1000, 1000, 200 ether, address(iTokenA), address(pool));
+        id = line.addCredit(1000, 1000, amt, address(iTokenA), address(pool));
         emit log_named_bytes32("pool ID", id);
         vm.stopPrank();
     }
