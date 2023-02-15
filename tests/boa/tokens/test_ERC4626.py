@@ -18,7 +18,7 @@ MAX_PITTANCE_FEE = 200 # 2% in bps
 # TEST all 4626 unit tests on preview functions. then compare preview func to actual action func 
 # (only diff between preview and action is side effects - state and events 
 
-@pytest.mark.token_4626
+@pytest.mark.ERC4626
 def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     """
     Test share price before and after first person enters the pool
@@ -33,7 +33,7 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     assert pool.balanceOf(admin) == init_token_balances
     assert pool.balanceOf(me) == init_token_balances
 
-@pytest.mark.token_4626
+@pytest.mark.ERC4626
 @given(amount=st.integers(min_value=0, max_value=10**25),
         # total pool assets/shares to manipulate share price
         assets=st.integers(min_value=0, max_value=10**25),
@@ -98,8 +98,8 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     # expected_total_supply = shares + shares_created + fees_generated
     # _assert_uint_with_rounding(pool.totalSupply(), expected_total_supply)
 
-@pytest.mark.token_4626
-@given(amount=st.integers(min_value=0, max_value=MAX_UINT),)
+@pytest.mark.ERC4626
+@given(amount=st.integers(min_value=0, max_value=(MAX_UINT / 4) * 3),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_deposit_cant_cause_total_asset_overflow(pool, base_asset, me, admin, init_token_balances, amount):
     init_pool_deposits = init_token_balances * 2

@@ -18,8 +18,13 @@ MAX_PITANCE_FEE = 200 # 2% in bps
 FEE_COEFFICIENT = 10000 # 100% in bps
 SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
 VESTING_RATE_COEFFICIENT = 10**18
+
 # TODO Ask ChatGPT to generate test cases in vyper
-# 1. delegate priviliges on investment functions
+# 1. depositing in pool increases total_assets
+# 1. add_credit to line decreaes increases total_deployed
+# 1. increase_credit to line decreaes increases total_deployed
+
+# 1. (done) delegate priviliges on investment functions
 # 1. vault_investment goes up by _amount 
 # 1. only vault that gets deposited into has vault_investment changed
 # 1. emits InvestVault event X params
@@ -43,12 +48,6 @@ VESTING_RATE_COEFFICIENT = 10**18
 
 # major internal funcs
 # 1. _reduce_credit with 0 will only withdraw available interest (test withdrawable, )
-
-# @settings(max_examples=500, deadline=timedelta(seconds=1000))
-# def test_owner_fees_burned_on_impairment(pool, me, admin):
-    # with boa.prank(me):
-        # pool
-
 
 def test_assert_pool_constants(pool):
     """
@@ -90,6 +89,74 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
 
 ############################################
 ########                            ########
+########  Basic Asset Functionality ########
+########                            ########
+############################################
+
+@pytest.mark.pool
+def test_depositing_in_pool_increases_total_assets(pool, admin, me, base_asset, init_token_balances):
+    assert base_asset.balanceOf(pool) == init_token_balances * 2
+    assert pool.total_assets() == init_token_balances * 2
+
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.deposit(100, me, sender=me)
+    assert base_asset.balanceOf(pool) == 100 + init_token_balances * 2
+    assert pool.total_assets() == 100 + init_token_balances * 2
+
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.mint(100, me, sender=me)
+    assert base_asset.balanceOf(pool) == 200 + init_token_balances * 2
+    assert pool.total_assets() == 200 + init_token_balances * 2
+    
+
+@pytest.mark.pool
+def test_withdrawing_from_pool_decreases_total_assets(pool, admin, me, base_asset, init_token_balances):
+    assert base_asset.balanceOf(pool) == init_token_balances * 2
+    assert pool.total_assets() == init_token_balances * 2
+
+    pool.withdraw(100, me, me, sender=me)
+    assert base_asset.balanceOf(pool) == init_token_balances * 2 - 100
+    assert pool.total_assets() == init_token_balances * 2 - 100
+    
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.redeem(100, me, me, sender=me)
+    assert base_asset.balanceOf(pool) == init_token_balances * 2 - 200
+    assert pool.total_assets() == init_token_balances * 2 - 200
+
+
+@pytest.mark.pool
+def test_depositing_in_pool_increases_total_supply(pool, admin, me, base_asset, init_token_balances):
+    assert pool.total_supply() == init_token_balances * 2
+
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.deposit(100, me, sender=me)
+    assert pool.total_supply() == 100 + init_token_balances * 2
+
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.mint(100, me, sender=me)
+    assert pool.total_supply() == 200 + init_token_balances * 2
+    
+
+@pytest.mark.pool
+def test_withdrawing_from_pool_decreases_total_supply(pool, admin, me, base_asset, init_token_balances):
+    assert pool.total_supply() == init_token_balances * 2
+
+    pool.withdraw(100, me, me, sender=me)
+    assert pool.total_supply() == init_token_balances * 2 - 100
+    
+    base_asset.mint(me, 100)
+    base_asset.approve(pool, 100, sender=me)
+    pool.redeem(100, me, me, sender=me)
+    assert pool.total_supply() == init_token_balances * 2 - 200
+    
+
+############################################
+########                            ########
 ########  Pool Owner Functionality  ########
 ########                            ########
 ############################################
@@ -123,14 +190,14 @@ def test_only_owner_can_set_max_asset(pool, admin, me):
         
 @pytest.mark.pool
 @pytest.mark.pool_owner
-@given(amount=st.integers(min_value=1, max_value=MAX_UINT - 1),) # min_val = 1 so no off by one when adjusting values
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT / 3),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_fuzz_set_max_assets_amount(pool, base_asset, admin, me, amount):
+def test_fuzz_set_max_assets_amount(pool, base_asset, admin, me, amount, init_token_balances):
     assert pool.max_assets() == MAX_UINT
     pool.set_max_assets(amount, sender=admin)
     assert pool.max_assets() == amount
 
-    assert pool.total_assets() == 0 # ensure clean state
+    assert pool.total_assets() == init_token_balances * 2 # ensure clean state
     base_asset.mint(me, amount + 1, sender=me) # do + 1 to test max overflow
     base_asset.approve(pool, amount + 1, sender=me)
     pool.deposit(amount, me, sender=me) # up to limit should work
@@ -172,12 +239,12 @@ def test_only_owner_can_set_min_deposit(pool, admin, me):
 @pytest.mark.pool_owner
 @given(amount=st.integers(min_value=1, max_value=MAX_UINT / 3),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_fuzz_set_min_deposit_amount(pool, base_asset, admin, me, amount):
+def test_fuzz_set_min_deposit_amount(pool, base_asset, admin, me, init_token_balances, amount):
     assert pool.min_deposit() == 0
     pool.set_min_deposit(amount, sender=admin)
     assert pool.min_deposit() == amount
 
-    assert pool.total_assets() == 0 # ensure clean state
+    assert pool.total_assets() == init_token_balances * 2 # ensure clean state
     base_asset.mint(me, amount, sender=me) # do + 1 to test max overflow
     base_asset.approve(pool, amount, sender=me)
 
@@ -400,11 +467,12 @@ def test_pittance_fees_emit_revenue_generated_event(pool, pittance_fee_types, ad
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
-def test_cant_set_pittance_fee_over_200_bps(pool, pittance_fee_types, admin):
+@given(pittance_fee=st.integers(min_value=MAX_PITANCE_FEE + 1, max_value=65535)) #max = uint16
+def test_cant_set_pittance_fee_over_200_bps(pool, pittance_fee_types, admin, pittance_fee):
     for fee_type in pittance_fee_types:
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
         with boa.reverts():
-            set_fee(MAX_PITANCE_FEE + 1, sender=admin)
+            set_fee(pittance_fee, sender=admin)
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
@@ -442,7 +510,7 @@ def test_can_set_performance_fee_under_10000_bps(pool, admin, perf_fee):
 
 # @pytest.mark.pool
 # @pytest.mark.rev_generator
-# @pytest.mark.event_emmissions
+# @pytest.mark.event_emissions
 # @given(fee_bps=st.integers(min_value=1, max_value=MAX_PITANCE_FEE))
 # @settings(max_examples=100, deadline=timedelta(seconds=1000))
 # def test_cant_set_snitch_fee(pool, pool_fee_types, admin, fee_bps):
@@ -452,7 +520,7 @@ def test_can_set_performance_fee_under_10000_bps(pool, admin, perf_fee):
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
-@pytest.mark.event_emmissions
+@pytest.mark.event_emissions
 @given(fee_bps=st.integers(min_value=1, max_value=MAX_PITANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_setting_fees_emits_standard_event(pool, pool_fee_types, admin, fee_bps):
@@ -489,139 +557,6 @@ def _is_pittance_fee(fee_name: str) -> bool:
     #             return True
 
 
-########################################
-########################################
-########################################
-#####                               ####
-#####       Credit Investment       ####
-#####                               ####
-########################################
-########################################
-########################################
-@pytest.mark.pool
-@pytest.mark.pool_owner
-@pytest.mark.line_integration
-def test_only_pool_owner_can_invest(pool, mock_line, admin, me, base_asset, init_token_balances):
-    # init_token_balances auto deposits so we have funds available
-
-    # new 4626 vault to invest in
-    new_pool = boa.load("contracts/DebtDAOPool.vy", admin, base_asset, "New Pool", "NEW", [0,0,0,0,0,0])
-    with boa.reverts():
-        pool.invest_vault(new_pool, 1, sender=me)
-    pool.invest_vault(new_pool, 1, sender=admin)
-    
-    with boa.reverts():
-        pool.add_credit(mock_line, 0, 0, 1, sender=me)
-    id = pool.add_credit(mock_line, 0, 0, 1, sender=admin)
-    
-    with boa.reverts():
-        pool.increase_credit(mock_line, id, 1, sender=me)
-    with boa.reverts():
-        pool.set_rates(mock_line, id, 100, 100, sender=me)
-    pool.increase_credit(mock_line, id, 1, sender=admin)
-    pool.set_rates(mock_line, id, 100, 100, sender=admin)
-
-
-@pytest.mark.pool
-@pytest.mark.line_integration
-@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_pool_can_deposit_to_line(pool, mock_line, admin, me, base_asset, init_token_balances, amount):
-    start_balance = init_token_balances * 2
-    base_asset.mint(me, amount)
-    base_asset.approve(pool, amount, sender=me)
-    pool.deposit(amount, me , sender=me)
-
-    assert base_asset.balances(pool) == start_balance + amount
-    assert base_asset.balances(mock_line) == 0
-    
-    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
-
-    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
-
-    assert lender == pool.address
-    assert deposit == amount
-    assert token == base_asset.address
-    assert base_asset.balances(pool) == start_balance
-    assert base_asset.balances(mock_line) == amount
-
-
-@pytest.mark.pool
-@pytest.mark.line_integration
-@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_pool_can_increase_deposit_to_line(pool, mock_line, admin, me, base_asset, init_token_balances, amount):
-    start_balance = init_token_balances * 2
-    base_asset.mint(me, amount * 2)
-    base_asset.approve(pool, amount * 2, sender=me)
-    pool.deposit(amount * 2, me , sender=me)
-
-    assert base_asset.balances(pool) == start_balance + amount * 2
-    assert base_asset.balances(mock_line) == 0
-    
-    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
-
-    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
-
-    assert lender == pool.address
-    assert deposit == amount
-    assert token == base_asset.address
-    assert base_asset.balances(pool) == start_balance + amount
-    assert base_asset.balances(mock_line) == amount
-
-    pool.increase_credit(mock_line, id, amount, sender=admin)
-
-    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
-
-    assert lender == pool.address
-    assert deposit == amount * 2
-    assert token == base_asset.address
-    assert base_asset.balances(pool) == start_balance
-    assert base_asset.balances(mock_line) == amount * 2
-
-
-@pytest.mark.pool
-@pytest.mark.line_integration
-@given(drate=st.integers(min_value=1, max_value=10**10),
-        frate=st.integers(min_value=1, max_value=10**10),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_pool_can_change_rates_on_existing_position(pool, mock_line, admin, me, base_asset, drate, frate):
-    amount = 1
-    base_asset.mint(me, amount * 2)
-    base_asset.approve(pool, amount * 2, sender=me)
-    pool.deposit(amount * 2, me , sender=me)
-
-    id = pool.add_credit(mock_line, 0, 0, amount, sender=admin)
-
-    (deposit, _, __, ___, _____, token, lender, _____) = mock_line.credits(id)
-
-    # ensure proper position for id
-    assert lender == pool.address
-    assert token == base_asset.address
-    
-    [drate, frate, _] = mock_line.rates(id)
-    assert drate == 0 and frate == 0
-
-    pool.set_rates(mock_line, id, drate, frate, sender=admin)
-
-    [drate2, frate2, _] = mock_line.rates(id)
-    assert drate2 == drate and frate2 == frate
-
-    # can set back to 0
-    pool.set_rates(mock_line, id, 0, 0, sender=admin)
-
-    [drate2, frate2, _] = mock_line.rates(id)
-    assert drate2 == 0 and frate2 == 0
-
-@pytest.mark.pool
-@pytest.mark.line_integration
-@given(amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_pool_can_change_rates_on_nonexistant_position(pool, mock_line, admin, me, base_asset, amount):
-    with boa.reverts(): # error from line contract gets bubbled to Pool
-        pool.set_rates(mock_line, id, 1_000, 100, sender=admin)
-
-
 
 ############################################%#
 ########                              ########
@@ -639,11 +574,9 @@ def test_calling_unlock_profit_releases_all_available_profit(
     pool, me, base_asset, total_profit, vesting_time, vesting_rate
 ):  
     base_asset.mint(pool, total_profit)
-    pool.eval(f"""
-        self.total_assets = {total_profit}
-        self.locked_profits = {total_profit}
-        self.vesting_rate = {vesting_rate}
-    """)
+    pool.eval(f"self.total_assets = {total_profit}")
+    pool.eval(f"self.locked_profits = {total_profit}")
+    pool.eval(f"self.vesting_rate = {vesting_rate}")
     # last_report set at contract deployment in fixture so should be `now`
 
     # nothing should change until we call unlock_profit

@@ -48,7 +48,7 @@ struct Rate:
     last_accrued: uint256
 
 # implements: ISecuredLine
-BPS_COEFFICIENT: constant(uint256) = 10_000
+INTEREST_RATE_COEFFICIENT: constant(uint256) = 315576000000 # (100% in bps * 364.25 days in seconds)
 
 ids: public(uint256)
 status: public(uint256)
@@ -96,31 +96,27 @@ def addCredit(
 def _set_rates(id: bytes32, drate: uint128, frate: uint128): 
     self.rates[id] = Rate({ drate: drate, frate: frate, last_accrued: block.timestamp })
 
-@external
-def setRates(id: bytes32, drate: uint128, frate: uint128): 
-    self._set_rates(id, drate, frate)
-
-@external
-def increaseCredit(id: bytes32,  amount: uint256): 
-    self.credits[id].deposit += amount
-    IERC20(self.credits[id].token).transferFrom(msg.sender, self, amount)
-
 @pure
 @internal
 def _calc_interest_rate(amount: uint256, timespan: uint256, rate: uint128) -> uint256:
-    return (amount * timespan * convert(rate, uint256)) / BPS_COEFFICIENT
+    return (amount * timespan * convert(rate, uint256)) / INTEREST_RATE_COEFFICIENT
 
 @pure
 @internal
 def _calc_new_interest(deposit: uint256, principal: uint256, timespan: uint256, drate: uint128, frate: uint128) -> uint256:
-    return self._calc_interest_rate(principal, timespan, drate) + self._calc_interest_rate(principal - deposit, timespan, frate)
+    return (self._calc_interest_rate(principal, timespan, drate) +
+            self._calc_interest_rate(deposit - principal, timespan, frate))
 
 @internal
-def _accrue(p: Position, id: bytes32, amount: uint256) -> Position:
+def _accrue(p: Position, id: bytes32) -> Position:
     if not p.isOpen:
         return p
 
     rate: Rate = self.rates[id]
+    
+    log named_uint("timestamp", block.timestamp)
+    log named_uint("last_accrued", rate.last_accrued)
+
     p.interestAccrued += self._calc_new_interest(
         p.deposit,
         p.principal,
@@ -131,43 +127,59 @@ def _accrue(p: Position, id: bytes32, amount: uint256) -> Position:
 
     return p
     
-
 @internal
 def _repay(p: Position, id: bytes32, amount: uint256) -> Position:
     principal_repay: uint256 = amount
     if(p.interestAccrued != 0):
         if(amount > p.interestAccrued):
+            p.interestRepaid += p.interestAccrued
+            p.principal = amount - p.interestAccrued
             p.interestAccrued = 0
-            principal_repay = amount - p.interestAccrued
         else:
             p.interestAccrued -= amount
-            principal_repay = 0
-
-    if principal_repay != 0:
-        p.principal -= principal_repay
+            p.interestRepaid += amount
+    
+    
 
     return p
 
+@external
+def accrueInterest(id: bytes32):
+    self.credits[id] = self._accrue(self.credits[id], id)
+
+@external
+def setRates(id: bytes32, drate: uint128, frate: uint128): 
+    self._set_rates(id, drate, frate)
+
+@external
+def increaseCredit(id: bytes32,  amount: uint256): 
+    new_p: Position = self._accrue(self.credits[id], id)
+    new_p.deposit += amount
+    self.credits[id] = new_p
+    IERC20(new_p.token).transferFrom(msg.sender, self, amount)
 
 @external
 def depositAndRepay(id: bytes32, amount: uint256):
-    self.credits[id] = self._repay(self.credits[id], id, amount)
+    self.credits[id] = self._repay(self._accrue(self.credits[id], id), id, amount)
     IERC20(self.credits[id].token).transferFrom(msg.sender, self, amount)
 
 @external
 def depositAndClose(id: bytes32, amount: uint256):
-    owed: uint256 = self.credits[id].principal + self.credits[id].interestAccrued
-    self.credits[id] = self._repay(self.credits[id], id, owed)
-    IERC20(self.credits[id].token).transferFrom(msg.sender, self, owed)
+    new_p: Position = self._accrue(self.credits[id], id)
+    owed: uint256 = new_p.principal + new_p.interestAccrued
+    self.credits[id] = self._repay(new_p, id, owed)
+    IERC20(new_p.token).transferFrom(msg.sender, self, owed)
 
 @external
 def close(id: bytes32):
     assert 0 == self.credits[id].principal
-    self.credits[id] = self._repay(self.credits[id], id, self.credits[id].interestAccrued)
-    IERC20(self.credits[id].token).transferFrom(msg.sender, self, self.credits[id].interestAccrued)
+    new_p: Position = self._accrue(self.credits[id], id)
+    self.credits[id] = self._repay(new_p, id, new_p.interestAccrued)
+    IERC20(new_p.token).transferFrom(msg.sender, self, new_p.interestAccrued)
 
 @external
 def withdraw(id: bytes32,  amount: uint256): 
+    # assert amount <= self.credits[id].deposit + self.credits[id].interestRepaid - self.credits[id].principal 
     IERC20(self.credits[id].token).transfer(self.credits[id].lender, amount)
 
 # @external
@@ -188,3 +200,8 @@ def withdraw(id: bytes32,  amount: uint256):
 
 # @external
 # def addSpigot(revenueContract: address, settings: Bytes[9])-> uint256: 
+
+
+event named_uint:
+    note: String[200]
+    value: uint256

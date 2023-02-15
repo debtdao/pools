@@ -35,3 +35,9 @@ from math import exp
 # 1. locked_profit^t = total_interest_earned * vesting_rate^t -- (t = 0, locked_profit = 0, t = 1, locked_profit = all_profit, t = 10, locked_profit = all_profit - vested_profit)
 # 1. total_assets^t = total_assets + (total_interest_earned * vesting_rate^t) -- (t = 0, total_assets = total_assets, t = 1, total_assets + vested_profit = all_profit, t = 10, total_assets = total_assets + vested_profit)
 # 1. price^t = total_assets^t / shares -- use derived total_assets^t from above
+
+
+# @settings(max_examples=500, deadline=timedelta(seconds=1000))
+# def test_owner_fees_burned_on_impairment(pool, me, admin):
+    # with boa.prank(me):
+        # pool

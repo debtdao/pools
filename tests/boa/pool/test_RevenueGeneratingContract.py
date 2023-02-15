@@ -39,7 +39,7 @@ ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev
 # 5. (invariant) max_uint claim_rev is claimable_rev
 # (done) 6. cant claim more than claimable_rev from claim_rev
 # (idk how to test) 9. claim rev should fail if push payments implemented
-# 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector 
+# (idk how to test) 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector 
 
 
 # Role ACL and state changes
@@ -353,6 +353,7 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
     assert pool.rev_recipient() == admin
+    rando = boa.env.generate_address()
 
     # try claiming empty rev token
     assert pool.claimable_rev(base_asset) == 0
@@ -360,17 +361,17 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, 0, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=boa.env.generate_address())
+        pool.claim_rev(pool, 0, sender=rando)
     # cant claim available amount
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, amount, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=boa.env.generate_address())
+        pool.claim_rev(pool, amount, sender=rando)
     # cant claim over available amount
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, amount + 1, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=boa.env.generate_address())
+        pool.claim_rev(pool, amount + 1, sender=rando)
 
     # add rev to pool and try to claim actual rev token
     pool.eval(f'self.accrued_fees = {amount}')
@@ -381,17 +382,17 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, 0, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=boa.env.generate_address())
+        pool.claim_rev(pool, 0, sender=rando)
     # cant claim available amount
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, amount, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=boa.env.generate_address())
+        pool.claim_rev(pool, amount, sender=rando)
     # cant claim over available amount
     with boa.reverts("not rev_recipient"):
         pool.claim_rev(pool, amount + 1, sender=me)
     with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=boa.env.generate_address())
+        pool.claim_rev(pool, amount + 1, sender=rando)
 
     # # add rev to pool and try to claim actual rev token
     new_token = boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
@@ -404,17 +405,17 @@ def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, 0, sender=me)
     with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, 0, sender=boa.env.generate_address())
+        pool.claim_rev(new_token, 0, sender=rando)
     # cant claim available amount
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount, sender=me)
     with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount, sender=boa.env.generate_address())
+        pool.claim_rev(new_token, amount, sender=rando)
     # cant claim over available amount
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount + 1, sender=me)
     with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount + 1, sender=boa.env.generate_address())
+        pool.claim_rev(new_token, amount + 1, sender=rando)
 
 
 @pytest.mark.pool
@@ -437,6 +438,9 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
     finally:
         # if revert then do nothing. function not implemented, allowed in EIP spec
         assert True
+
+
+
 
 # Unrelated to our contract. debugging boa functionality
 # def test_assertion_state_change(pool, me, admin, pool_roles):
