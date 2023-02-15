@@ -47,9 +47,9 @@ interface IDebtDAOPool:
 	def add_credit( line: address, drate: uint128, frate: uint128, amount: uint256) -> bytes32: nonpayable
 
 	# divestment and loss
-	def impair(line: address, id: bytes32) -> (uint256, uint256): nonpayable
-	def reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uint256): nonpayable
-	def use_and_repay(line: address, repay: uint256, withdraw: uint256) -> (uint256, uint256): nonpayable
+	def impair(line: address, _id: bytes32) -> (uint256, uint256): nonpayable
+	def reduce_credit(_line: address, _id: bytes32, amount: uint256) -> (uint256, uint256): nonpayable
+	def use_and_repay(_line: address, repay: uint256, withdraw: uint256) -> (uint256, uint256): nonpayable
 	
 	# external 4626 interactions
 	def divest_vault(vault: address, amount: uint256) -> bool: nonpayable
@@ -973,7 +973,7 @@ def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uin
 		withdrawable = deposit + interest
 
 	# set how much deposit vs interest we are collecting
-	# NOTE: MUST come after `amount` shorthand checks
+	# NOTE: MUST come after `amount` shorthand assignments
 	if withdrawable < interest:
 		# if we want less than claimable interest, reduce incoming interest
 		interest = withdrawable
@@ -1094,7 +1094,6 @@ def _withdraw(
 
 
 @internal
-@nonreentrant("price_update")
 def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256):
 	"""
 	@return diff in APR, diff in owner fees
@@ -1161,7 +1160,6 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	log TrackSharePrice(init_share_price, self._get_share_price(), self._get_share_APR())
 
 @internal
-@nonreentrant("price_update")
 def _unlock_profits() -> uint256:
 	locked_profit: uint256 = self._calc_locked_profit()
 	vested_profits: uint256 = self.locked_profits - locked_profit
@@ -1768,6 +1766,7 @@ struct Position:
 	decimals: uint8
 	token: address
 	lender: address
+	isOpen: bool
 
 interface ISecuredLine:
 	def borrower() -> address: pure
