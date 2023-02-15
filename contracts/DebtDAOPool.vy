@@ -327,7 +327,7 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 	@param _line - _line of credit contract to call
 	@param _id   - credit position on _line controlled by this pool 
 	"""
-	assert ISecuredLine(_line).status() == LINE_STATUS.INSOLVENT
+	assert ISecuredLine(_line).status() == LINE_STATUS.INSOLVENT, "not insolvent"
 
 	position: Position = ISecuredLine(_line).credits(_id)
 

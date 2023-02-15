@@ -31,6 +31,7 @@ interface IDebtDAOPool {
     function deposit(uint256 _assets, address _receiver) external returns (uint256);
     function depositWithReferral(uint256 _assets, address _receiver, address _referrer) external returns (uint256);
 
+    function impair(address _line, bytes32 _id) external returns (uint256,uint256);
     // abort
     function abort(address _line, bytes32 _id) external returns(uint256, uint256);
     // Pool Admin

@@ -11,6 +11,9 @@ import {ModuleFactory} from "debtdao/modules/factories/ModuleFactory.sol";
 import {SimpleOracle} from "debtdao/mock/SimpleOracle.sol";
 import {SecuredLine} from "debtdao/modules/credit/SecuredLine.sol";
 
+import { LineLib } from "debtdao/utils/LineLib.sol";
+import { ZeroEx } from "debtdao/mock/ZeroEx.sol";
+import { ISpigot } from 'debtdao/interfaces/ISpigot.sol';
 import {IEscrow} from "debtdao/interfaces/IEscrow.sol";
 
 import {stdMath} from "forge-std/StdMath.sol";
@@ -31,6 +34,8 @@ contract PoolDelegateTest is Test, Events {
     SecuredLine line;
     SecuredLine nonPoolLine;
 
+    ZeroEx dex; 
+
     IBondToken iTokenA;
     IBondToken iTokenB;
 
@@ -40,7 +45,8 @@ contract PoolDelegateTest is Test, Events {
     address delegate;
     address arbiter;
     address borrower;
-    address swapTarget;
+
+    address mockRevenueContract = address(0xbeef);
 
     address userA;
     address userB;
@@ -51,9 +57,10 @@ contract PoolDelegateTest is Test, Events {
         delegate = makeAddr("delegate");
         arbiter = makeAddr("arbiter");
         borrower = makeAddr("borrower");
-        swapTarget = makeAddr("swapTarget");
         userA = makeAddr("userA");
         userB = makeAddr("userB");
+
+        dex = new ZeroEx();
 
         // deploy the tokens
         iTokenA = IBondToken(
@@ -323,6 +330,99 @@ contract PoolDelegateTest is Test, Events {
         vm.stopPrank();
     }
 
+    function test_can_use_and_repay_as_delegate() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        _addCollateral(100 ether);
+
+        uint256 borrowAmount = 50 ether;
+
+        vm.startPrank(borrower);
+        line.borrow(id, borrowAmount);
+        vm.stopPrank();
+
+        // simulate revenue (push payment), owner split is 10%
+        iTokenB.mint(address(line.spigot()), borrowAmount * 10); 
+
+        ISpigot(line.spigot()).claimRevenue(mockRevenueContract, address(iTokenB), bytes(""));
+
+        bytes memory tradeData = abi.encodeWithSignature(
+            'trade(address,address,uint256,uint256)',
+            address(iTokenB), // token in
+            address(iTokenA), // token out
+            20 ether, //amountIn
+            10 ether // minAmountOut
+        );
+
+        vm.startPrank(arbiter);
+        line.claimAndTrade(address(iTokenB), tradeData);
+        vm.stopPrank();
+
+        uint256 unused =  line.unused(address(iTokenA));
+        emit log_named_uint("unused", unused);
+
+      (, uint256 principal,uint256 interest,,,,,) = line.credits(id);
+
+        emit log_named_uint("principal", principal);
+        emit log_named_uint("interest", interest);
+
+        vm.startPrank(delegate);
+        pool.use_and_repay(address(line),  unused, 0);
+
+        // TODO: check balances
+    }
+
+    function test_cannot_impair_when_line_not_insolvent() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        _addCollateral(100 ether);
+
+        uint256 borrowAmount = 50 ether;
+
+        vm.startPrank(borrower);
+        line.borrow(id, borrowAmount);
+        vm.stopPrank();
+
+        vm.expectRevert(bytes("not insolvent"));
+        pool.impair(address(line), id);
+    }
+
+    function test_can_impair_when_line_insolvent() public {
+
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        _addCollateral(100 ether);
+
+        uint256 borrowAmount = 20 ether;
+
+        vm.startPrank(borrower);
+        line.borrow(id, borrowAmount);
+        vm.stopPrank();
+
+
+
+
+        emit log_named_uint("user balance", iTokenA.balanceOf(address(borrower)));
+        
+        vm.startPrank(borrower);
+        iTokenA.approve(address(line), type(uint256).max);
+        line.depositAndRepay(borrowAmount - 1);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + ttl + 1 days);
+
+        vm.startPrank(arbiter);
+        line.releaseSpigot(arbiter);
+        ISpigot(line.spigot()).updateOwner(address(30));
+        line.declareInsolvent();
+        assertEq(uint256(line.status()), uint256(LineLib.STATUS.INSOLVENT));
+        vm.stopPrank();
+
+    }
+
     // =================== INTERNAL HELPERS
 
     function _usersDepositIntoPool(uint256 amt) internal {
@@ -346,12 +446,31 @@ contract PoolDelegateTest is Test, Events {
             address(moduleFactory),
             arbiter,
             address(oracle),
-            payable(swapTarget) // swap target
+            payable(address(dex)) // swap target
         );
         address nonPoolLineAddr = lineFactory.deploySecuredLine(borrower, ttl);
         address lineAddr = lineFactory.deploySecuredLine(borrower, ttl);
         line = SecuredLine(payable(lineAddr));
         nonPoolLine = SecuredLine(payable(nonPoolLineAddr));
+
+        ISpigot.Setting memory setting = ISpigot.Setting({
+            ownerSplit: 10,
+            claimFunction: bytes4(0),
+            transferOwnerFunction: bytes4("1234")
+        });
+
+        vm.prank(arbiter);
+        line.addSpigot(mockRevenueContract, setting);
+
+        iTokenA.mint(address(dex), 10_000 ether);
+        iTokenB.mint(address(dex), 10_000 ether);
+        iTokenA.approve(address(dex), type(uint256).max);
+        iTokenB.approve(address(dex), type(uint256).max);
+    }
+
+    function _simulateRevenue(address token, uint256 amount) internal{
+        IBondToken(token).mint(mockRevenueContract, amount);
+        // iTokenB.mint(mockRevenueContract, amount);
     }
 
     function _deployPool() internal {

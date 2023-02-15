@@ -483,6 +483,56 @@
         }
       }
     },
+    "lib/Line-of-Credit/contracts/mock/ZeroEx.sol": {
+      "lastModificationDate": 1675461794671,
+      "contentHash": "6d96d46e24a6928dd9fa62a6917c5555",
+      "sourceName": "lib/Line-of-Credit/contracts/mock/ZeroEx.sol",
+      "solcConfig": {
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs",
+            "appendCBOR": true
+          },
+          "outputSelection": {
+            "*": {
+              "": [
+                "ast"
+              ],
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ]
+            }
+          },
+          "evmVersion": "london",
+          "libraries": {}
+        }
+      },
+      "imports": [
+        "lib/Line-of-Credit/contracts/interfaces/IInterestRateCredit.sol",
+        "lib/Line-of-Credit/contracts/interfaces/ILineOfCredit.sol",
+        "lib/Line-of-Credit/contracts/interfaces/IOracle.sol",
+        "lib/Line-of-Credit/contracts/utils/LineLib.sol",
+        "lib/Line-of-Credit/lib/chainlink/contracts/src/v0.8/Denominations.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol",
+        "lib/Line-of-Credit/lib/openzeppelin-contracts/contracts/utils/Address.sol"
+      ],
+      "versionRequirement": "=0.8.16",
+      "artifacts": {
+        "ZeroEx": {
+          "0.8.16+commit.07a7930e.Darwin.appleclang": "ZeroEx.sol/ZeroEx.json"
+        }
+      }
+    },
     "lib/Line-of-Credit/contracts/modules/credit/EscrowedLine.sol": {
       "lastModificationDate": 1675461794671,
       "contentHash": "0b2541f31cc8bae0a27e33367cd185ca",
@@ -2473,8 +2523,8 @@
       }
     },
     "tests/foundry/PoolDelegateTest.t.sol": {
-      "lastModificationDate": 1676485283212,
-      "contentHash": "7d636a19c03da7665f8c688a36006da6",
+      "lastModificationDate": 1676497041276,
+      "contentHash": "683c3119ab5761ebfe9c5f8fc3be6b8d",
       "sourceName": "tests/foundry/PoolDelegateTest.t.sol",
       "solcConfig": {
         "settings": {
@@ -2516,6 +2566,7 @@
         "lib/Line-of-Credit/contracts/interfaces/ISpigot.sol",
         "lib/Line-of-Credit/contracts/interfaces/ISpigotedLine.sol",
         "lib/Line-of-Credit/contracts/mock/SimpleOracle.sol",
+        "lib/Line-of-Credit/contracts/mock/ZeroEx.sol",
         "lib/Line-of-Credit/contracts/modules/credit/EscrowedLine.sol",
         "lib/Line-of-Credit/contracts/modules/credit/LineOfCredit.sol",
         "lib/Line-of-Credit/contracts/modules/credit/SecuredLine.sol",
@@ -2672,8 +2723,8 @@
       }
     },
     "tests/foundry/interfaces/IDebtDAOPool.sol": {
-      "lastModificationDate": 1676485333124,
-      "contentHash": "ff2ff879d72373c66f423757e35f2b27",
+      "lastModificationDate": 1676495229937,
+      "contentHash": "45eb41e39ff032a15ddb2077d9ebf14a",
       "sourceName": "tests/foundry/interfaces/IDebtDAOPool.sol",
       "solcConfig": {
         "settings": {
