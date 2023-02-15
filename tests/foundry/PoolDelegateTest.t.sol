@@ -11,16 +11,20 @@ import {ModuleFactory} from "debtdao/modules/factories/ModuleFactory.sol";
 import {SimpleOracle} from "debtdao/mock/SimpleOracle.sol";
 import {SecuredLine} from "debtdao/modules/credit/SecuredLine.sol";
 
+import {IEscrow} from "debtdao/interfaces/IEscrow.sol";
+
+import {stdMath} from "forge-std/StdMath.sol";
+
 interface Events {
     event MutualConsentRegistered(bytes32 proposalId, address taker);
 }
-contract PoolDelegateTest is Test, Events {
 
+contract PoolDelegateTest is Test, Events {
     string constant POOL_NAME = "Test Pool";
     string constant POOL_SYMBOL = "TP";
 
     VyperDeployer vyperDeployer = new VyperDeployer();
-    
+
     LineFactory lineFactory;
     ModuleFactory moduleFactory;
     SimpleOracle oracle;
@@ -77,18 +81,16 @@ contract PoolDelegateTest is Test, Events {
         oracle = new SimpleOracle(address(iTokenA), address(iTokenB));
 
         fees = Fees(
-            100,
-            20,
-            20,
-            10,
-            50,
-            20
+            100, // performance
+            20,  // deposit
+            20,  // withdraw
+            10,  // flash
+            50,  // collector
+            20   //  referral
         );
         _deployLine();
         _deployPool();
     }
-
-
 
     function test_can_deploy_pool() public {
         assertEq(pool.owner(), delegate, "owner not delegate");
@@ -131,16 +133,23 @@ contract PoolDelegateTest is Test, Events {
         address recipient = makeAddr("recipient");
 
         iTokenA.mint(depositer, 120 ether);
-        assertEq(iTokenA.balanceOf(depositer), 120 ether, "incorrect token balance");
+        assertEq(
+            iTokenA.balanceOf(depositer),
+            120 ether,
+            "incorrect token balance"
+        );
 
         vm.startPrank(depositer);
         iTokenA.approve(address(pool), 100 ether);
         pool.deposit(100 ether, recipient);
         vm.stopPrank();
 
-        assertEq(iTokenA.balanceOf(depositer), 20 ether, "user balance does not match after depositing into pool");
+        assertEq(
+            iTokenA.balanceOf(depositer),
+            20 ether,
+            "user balance does not match after depositing into pool"
+        );
     }
-
 
     // =================== CREDIT
 
@@ -152,8 +161,8 @@ contract PoolDelegateTest is Test, Events {
         pool.add_credit(line, 200, 200, 1 ether);
         vm.stopPrank();
     }
-    function test_can_add_credit_and_increase_credit() public {
 
+    function test_can_add_credit_and_increase_credit() public {
         _usersDepositIntoPool(150 ether);
 
         bytes32 id = _addCredit(200 ether);
@@ -166,11 +175,9 @@ contract PoolDelegateTest is Test, Events {
         vm.startPrank(delegate);
         pool.increase_credit(address(line), id, 1 ether);
         vm.stopPrank();
-
     }
 
     function test_cannot_add_credit_without_sufficient_funds() public {
-
         _usersDepositIntoPool(1 ether);
         bytes32 id = _addCredit(2 ether);
         vm.startPrank(delegate);
@@ -179,49 +186,146 @@ contract PoolDelegateTest is Test, Events {
         vm.stopPrank();
     }
 
-    function test_non_pool_line() public {
-        address lender = makeAddr("lender");
-        iTokenA.mint(lender, 200 ether);
-
-        vm.startPrank(lender);
-        iTokenA.approve(address(nonPoolLine), 100 ether);
-        nonPoolLine.addCredit(1000, 1000, 100 ether, address(iTokenA), lender);
-        vm.stopPrank();
-
-        vm.startPrank(borrower);
-        bytes32 id = nonPoolLine.addCredit(1000, 1000, 100 ether, address(iTokenA), lender);
-        emit log_named_bytes32("nonPool ID", id);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + 30 days);
-
-        vm.startPrank(lender);
-        nonPoolLine.increaseCredit(id, 100 ether);
-        vm.stopPrank();
-    }
-
     function test_can_set_rates() public {
         _usersDepositIntoPool(150 ether);
         bytes32 id = _addCredit(200 ether);
 
         vm.startPrank(delegate);
-        pool.set_rates(address(line), id, 500,500);
+        pool.set_rates(address(line), id, 500, 500);
         vm.stopPrank();
     }
-    
+
     function test_cannot_set_rates_as_pleb() public {
         _usersDepositIntoPool(150 ether);
         bytes32 id = _addCredit(200 ether);
 
         vm.startPrank(makeAddr("pleb"));
         vm.expectRevert(bytes("not owner"));
-        pool.set_rates(address(line), id, 500,500);
+        pool.set_rates(address(line), id, 500, 500);
         vm.stopPrank();
     }
+
+    function test_can_collect_interest_as_anyone() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        _addCollateral(100 ether);
+
+        vm.startPrank(borrower);
+        line.borrow(id, 50 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 30 days);
+
+        vm.startPrank(borrower);
+        iTokenA.approve(address(line), 20 ether);
+        line.depositAndRepay(20 ether);
+        vm.stopPrank();
+
+        line.updateOutstandingDebt();
+        (uint256 deposit, uint256 interest) = line.available(id);
+
+        emit log_named_uint("deposit", deposit);
+        emit log_named_uint("interest", interest);
+
+        address caller = makeAddr("caller");
+        uint256 callerBalance = iTokenA.balanceOf(caller);
+        emit log_named_uint("caller balance", callerBalance);
+
+        vm.startPrank(caller);
+        uint256 poolEarned = pool.collect_interest(address(line), id);
+        emit log_named_uint("poolEarned", poolEarned);
+        vm.stopPrank();
+
+        emit log_named_uint("caller balance after", iTokenA.balanceOf(caller));
+
+        // caller fee should be {fees.collector}% of what the pool earned
+        uint256 callerBalanceAfter = iTokenA.balanceOf(caller);
+
+        uint256 callerPct = (callerBalanceAfter * 10000) / poolEarned;
+        emit log_named_uint("pct", callerPct);
+        assertEq(callerPct, fees.collector);
+    }
+
+    function test_cannot_abort_as_random_user() public {
+
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        address rando = makeAddr("rando");
+
+        vm.startPrank(rando);
+        vm.expectRevert(bytes("not owner"));
+        pool.abort(address(line), id);
+        vm.stopPrank();
+
+    }
+
+    function test_can_abort_as_delegate() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        _addCollateral(100 ether);
+
+        vm.startPrank(borrower);
+        line.borrow(id, 50 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 30 days);
+
+        line.updateOutstandingDebt();
+
+        vm.startPrank(delegate);
+        (uint256 principalWithdrawn, uint256 interestEarned) = pool.abort(address(line), id);
+        vm.stopPrank();
+        emit log_named_uint("interestEarned", interestEarned);
+        assertEq(principalWithdrawn, 150 ether);
+
+        // TODO: check interest amount
+
+    }
+
+    function test_cannot_reduce_credit_as_random_caller() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        address rando = makeAddr("rando");
+
+        vm.startPrank(rando);
+        vm.expectRevert(bytes("not owner"));
+        pool.reduce_credit(address(line), id, 100 ether);
+        vm.stopPrank();
+    }
+
+    function test_can_reduce_credit_as_delegate() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether); 
+
+        assertEq(iTokenA.balanceOf(address(line)), 200 ether);
+
+        vm.startPrank(delegate);
+        pool.reduce_credit(address(line), id, 100 ether);
+        vm.stopPrank();
+
+        assertEq(iTokenA.balanceOf(address(line)), 100 ether);
+
+    }
+
+    function test_cannot_use_and_repay_as_random_user() public {
+        _usersDepositIntoPool(150 ether);
+        bytes32 id = _addCredit(200 ether);
+
+        address rando = makeAddr("rando");
+
+        vm.startPrank(rando);
+        vm.expectRevert(bytes("not owner"));
+        pool.use_and_repay(address(line), 10 ether, 10 ether);
+        vm.stopPrank();
+    }
+
     // =================== INTERNAL HELPERS
 
     function _usersDepositIntoPool(uint256 amt) internal {
- 
         iTokenA.mint(userA, amt);
         iTokenA.mint(userB, amt);
 
@@ -257,11 +361,11 @@ contract PoolDelegateTest is Test, Events {
             vyperDeployer.deployContract(
                 "contracts/DebtDAOPool",
                 abi.encode(
-                    delegate,           // delegate
-                    address(iTokenA),    // asset
-                    POOL_NAME,          // name
-                    POOL_SYMBOL,        // symbol
-                    fees                // fees
+                    delegate, // delegate
+                    address(iTokenA), // asset
+                    POOL_NAME, // name
+                    POOL_SYMBOL, // symbol
+                    fees // fees
                 )
             )
         );
@@ -270,7 +374,7 @@ contract PoolDelegateTest is Test, Events {
         vm.stopPrank();
     }
 
-    function _addCredit(uint256 amt) internal returns (bytes32 id){
+    function _addCredit(uint256 amt) internal returns (bytes32 id) {
         vm.startPrank(delegate);
         vm.expectEmit(false, false, false, false);
         emit MutualConsentRegistered(bytes32(0), borrower);
@@ -283,4 +387,15 @@ contract PoolDelegateTest is Test, Events {
         vm.stopPrank();
     }
 
+    function _addCollateral(uint256 amt) internal {
+        vm.startPrank(arbiter);
+        IEscrow(address(line.escrow())).enableCollateral(address(iTokenB));
+        vm.stopPrank();
+
+        iTokenB.mint(borrower, amt);
+        vm.startPrank(borrower);
+        iTokenB.approve(address(line.escrow()), amt);
+        IEscrow(address(line.escrow())).addCollateral(amt, address(iTokenB));
+        vm.stopPrank();
+    }
 }

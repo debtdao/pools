@@ -989,7 +989,11 @@ def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uin
 	if interest != 0:
 		self._update_shares(interest) # add to locked profits
 		# TODO TEST does taking fees before/after updating shares affect RDT ???
+		
+		log named_uint("interest",interest)
+
 		fees: uint256 = self._take_performance_fee(interest)
+
 
 	# NOTE: no need to log, Line emits events already
 	ISecuredLine(line).withdraw(id, withdrawable)
@@ -1109,6 +1113,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 
 		self.total_assets += _assets
 		self.locked_profits += _assets
+
 		# Profit is locked and gradually released per block
 
 		return (_assets, 0) # TODO return change in APR
@@ -1163,9 +1168,12 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	log TrackSharePrice(init_share_price, self._get_share_price(), self._get_share_APR())
 
 @internal
-@nonreentrant("price_update")
 def _unlock_profits() -> uint256:
 	locked_profit: uint256 = self._calc_locked_profit()
+	
+	log named_uint("locked_profit", locked_profit)
+
+	
 	vested_profits: uint256 = self.locked_profits - locked_profit
 	
 	self.locked_profits -= vested_profits
@@ -1207,12 +1215,15 @@ def _calc_locked_profit() -> uint256:
 
 	if(pct_profit_locked < VESTING_RATE_COEFFICIENT):
 		locked_profit: uint256 = self.locked_profits
+
+		# log named_uint("locked_profit",locked_profit)
+
 		return locked_profit - (
 				pct_profit_locked
 				* locked_profit
 				/ VESTING_RATE_COEFFICIENT
 			)
-	else:        
+	else:     
 		return 0
 
 
@@ -1908,8 +1919,9 @@ event UpdateProfitDegredation:
 
 # Testing events
 event named_uint:
-	num: indexed(uint256)
 	str: indexed(String[100])
+	num: indexed(uint256)
+
 
 event named_addy:
 	addy: indexed(address)
@@ -1917,3 +1929,8 @@ event named_addy:
 
 event test_event:
 	str: String[32]
+
+event test_collect_interest:
+	interest: uint256
+	deposit: uint256
+	withdrawable: uint256
