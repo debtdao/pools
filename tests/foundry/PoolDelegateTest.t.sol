@@ -390,37 +390,68 @@ contract PoolDelegateTest is Test, Events {
     }
 
     function test_can_impair_when_line_insolvent() public {
+        uint256 borrowAmount = 20 ether;
 
         _usersDepositIntoPool(150 ether);
-        bytes32 id = _addCredit(200 ether);
 
-        _addCollateral(100 ether);
+        bytes32 id = _addCredit(borrowAmount);
 
-        uint256 borrowAmount = 20 ether;
+        _addCollateral(borrowAmount/2);
+
+
 
         vm.startPrank(borrower);
         line.borrow(id, borrowAmount);
         vm.stopPrank();
 
-
-
-
         emit log_named_uint("user balance", iTokenA.balanceOf(address(borrower)));
         
         vm.startPrank(borrower);
         iTokenA.approve(address(line), type(uint256).max);
-        line.depositAndRepay(borrowAmount - 1);
+        line.depositAndRepay(borrowAmount/4);
         vm.stopPrank();
 
         vm.warp(block.timestamp + ttl + 1 days);
 
+        assertEq(uint256(line.healthcheck()), uint256(LineLib.STATUS.LIQUIDATABLE));
+
+        line.updateOutstandingDebt();
+
+        (uint256 deposit, uint256 principal, uint256 interest, uint256 interestRepaid,,,,) = line.credits(id);
+
+        emit log_named_uint("principal", principal);
+        emit log_named_uint("interest", interest);
+        emit log_named_uint("deposit", deposit);
+        emit log_named_uint("interestRepaid", interestRepaid);
+
+        uint256 collateralValue = IEscrow(address(line.escrow())).getCollateralValue();
+        emit log_named_uint("collateralValue", collateralValue);
+
         vm.startPrank(arbiter);
+
+        uint256 liquidationAmount = iTokenB.balanceOf(address(line.escrow()));
+         emit log_named_uint("liquidationAmount", liquidationAmount);
+
+        assertEq(liquidationAmount, line.liquidate(liquidationAmount, address(iTokenB)));
+
+        collateralValue = IEscrow(address(line.escrow())).getCollateralValue();
+        emit log_named_uint("collateralValue post liquidation", collateralValue);
+
         line.releaseSpigot(arbiter);
-        ISpigot(line.spigot()).updateOwner(address(30));
+        ISpigot(line.spigot()).updateOwner(makeAddr("new owner"));
+
+
         line.declareInsolvent();
-        assertEq(uint256(line.status()), uint256(LineLib.STATUS.INSOLVENT));
+        assertEq(uint256(line.healthcheck()), uint256(LineLib.STATUS.INSOLVENT));
+
         vm.stopPrank();
 
+        assertEq(uint256(line.status()), uint256(LineLib.STATUS.INSOLVENT));
+
+        // TODO: should impair
+        vm.startPrank(makeAddr("rando"));
+        pool.impair(address(line), id);
+        vm.stopPrank();
     }
 
     // =================== INTERNAL HELPERS

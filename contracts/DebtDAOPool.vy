@@ -169,6 +169,17 @@ struct Fees:
 	# % fee (in bps) to charge pool depositors and give to referrers
 	referral: uint16
 
+struct LINE_STATUS:
+	UNINITIALIZED: uint8
+    
+	ACTIVE: uint8
+    
+	LIQUIDATABLE: uint8
+
+	REPAID: uint8
+    
+	INSOLVENT: uint8
+
 enum FEE_TYPES:
 	# should be same order as Fees struct
 	PERFORMANCE
@@ -181,6 +192,7 @@ enum FEE_TYPES:
 
 fees: public(Fees)
 
+line_status: LINE_STATUS
 
 @external
 def __init__(
@@ -232,6 +244,8 @@ def __init__(
 	# 2048 epochs = 2048 blocks = COEFFICIENT / 2048 / 10 ** 6 ???
 	self.vesting_rate = convert(VESTING_RATE_COEFFICIENT * 46 / 10 ** 6 , uint256)
 	self.last_report = block.timestamp
+
+	self.line_status = LINE_STATUS({UNINITIALIZED:0,ACTIVE:1,LIQUIDATABLE:2,REPAID:3,INSOLVENT:4})
 
 	# IERC2612
 	CACHED_CHAIN_ID = chain.id # cache before compute
@@ -327,7 +341,8 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 	@param _line - _line of credit contract to call
 	@param _id   - credit position on _line controlled by this pool 
 	"""
-	assert ISecuredLine(_line).status() == LINE_STATUS.INSOLVENT, "not insolvent"
+	
+	assert ISecuredLine(_line).status() == self.line_status.INSOLVENT, "not insolvent"
 
 	position: Position = ISecuredLine(_line).credits(_id)
 
@@ -635,7 +650,7 @@ def repay_debt(_line: address, _amount: uint256):
 	"""	
 	self._assert_owner_has_available_funds(_amount)
 	assert self == ISecuredLine(_line).borrower()
-	assert LINE_STATUS.ACTIVE == ISecuredLine(_line).status()
+	assert self.line_status.ACTIVE == ISecuredLine(_line).status()
 
 	IERC20(ASSET).approve(_line, _amount)
 	ISecuredLine(_line).depositAndRepay(_amount)
@@ -650,8 +665,8 @@ def repay_debt(_line: address, _amount: uint256):
 def emergency_repay(_line: address, _amount: uint256):
 	self._assert_owner_has_available_funds(_amount)
 	assert self == ISecuredLine(_line).borrower()
-	status: LINE_STATUS = ISecuredLine(_line).status()
-	assert LINE_STATUS.LIQUIDATABLE == status or LINE_STATUS.INSOLVENT == status
+	status: uint8 = ISecuredLine(_line).status()
+	assert self.line_status.LIQUIDATABLE == status or self.line_status.INSOLVENT == status
 	# TODO could also check nextInQ dRate vs self.get_share_APR() and auto repay if one is +- the other
 
 	# force debt repayment and payout snitch fee if applicable
@@ -1765,12 +1780,12 @@ interface IRevenueGenerator:
 
 # Debt DAO interfaces
 # @notice LineLib.STATUS
-enum LINE_STATUS:
-	UNINITIALIZED
-	ACTIVE
-	LIQUIDATABLE
-	REPAID
-	INSOLVENT
+# enum LINE_STATUS:
+# 	UNINITIALIZED
+# 	ACTIVE
+# 	LIQUIDATABLE
+# 	REPAID
+# 	INSOLVENT
 
 # (uint256, uint256, uint256, uint256, uint8, address, address)
 struct Position:
@@ -1785,7 +1800,7 @@ struct Position:
 interface ISecuredLine:
 	def borrower() -> address: pure
 	def ids(index: uint256) -> bytes32: view
-	def status() -> LINE_STATUS: view
+	def status() -> uint8: view
 	def credits(id: bytes32) -> Position: view
 	def available(id: bytes32) -> (uint256, uint256): view
 
@@ -1921,6 +1936,10 @@ event UpdateProfitDegredation:
 event named_uint:
 	str: indexed(String[100])
 	num: indexed(uint256)
+
+event named_uint_8:
+	str: indexed(String[100])
+	num: indexed(uint8)
 
 
 event named_addy:
