@@ -1,12 +1,14 @@
-import boa
 import ape
+import boa
+import math
 import pytest
 import logging
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from datetime import timedelta
 from math import exp
-
+from ..conftest import MAX_UINT, INIT_USER_POOL_BALANCE
+from .conftest import VESTING_RATE_COEFFICIENT
 
 # https://docs.apeworx.io/ape/stable/methoddocs/managers.html?highlight=project#module-ape.managers.project.manager
 
@@ -41,3 +43,51 @@ from math import exp
 # def test_owner_fees_burned_on_impairment(pool, me, admin):
     # with boa.prank(me):
         # pool
+
+
+
+
+############################################%#
+########                              ########
+########  Locked Profit Calculations  ########
+########                              ########
+############################################%#
+
+@pytest.mark.pool
+@pytest.mark.slow
+@given(total_profit=st.integers(min_value=10**18, max_value=MAX_UINT),
+        vesting_time=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT * 2),
+        vesting_rate=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_calling_unlock_profit_releases_all_available_profit(
+    pool, me, base_asset, total_profit, vesting_time, vesting_rate
+):  
+    base_asset.mint(pool, total_profit)
+    pool.eval(f"self.total_assets = {total_profit}")
+    pool.eval(f"self.locked_profits = {total_profit}")
+    pool.eval(f"self.vesting_rate = {vesting_rate}")
+    # last_report set at contract deployment in fixture so should be `now`
+
+    # nothing should change until we call unlock_profit
+    assert pool.locked_profits() == total_profit
+    # max liquid assets is 0 bc all locked
+    assert pool.maxFlashLoan(base_asset) == 0
+    
+    boa.env.time_travel(vesting_time)
+
+    locked_profit = 0
+    if vesting_time is 0 or vesting_rate is 0:
+        locked_profit = total_profit
+    elif vesting_time * vesting_rate >= VESTING_RATE_COEFFICIENT: # wrong condition. check vesting_rate vs coeeficient and time compared to that
+        locked_profit = 0
+    else:
+         locked_profit = math.floor(total_profit - math.floor(((total_profit * vesting_time * vesting_rate) / VESTING_RATE_COEFFICIENT)))
+
+    pool.unlock_profits()
+
+    assert pool.locked_profits() == locked_profit
+    # max liquid should include unlocked profits now
+    assert pool.maxFlashLoan(base_asset) == total_profit - locked_profit
+
+   
+    

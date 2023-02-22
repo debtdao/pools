@@ -124,23 +124,21 @@ def _accrue(p: Position, id: bytes32) -> Position:
         rate.drate,
         rate.frate
     )
+    
+    self.rates[id].last_accrued = block.timestamp
 
     return p
     
 @internal
 def _repay(p: Position, id: bytes32, amount: uint256) -> Position:
-    principal_repay: uint256 = amount
-    if(p.interestAccrued != 0):
-        if(amount > p.interestAccrued):
-            p.interestRepaid += p.interestAccrued
-            p.principal = amount - p.interestAccrued
-            p.interestAccrued = 0
-        else:
-            p.interestAccrued -= amount
-            p.interestRepaid += amount
+    if(amount > p.interestAccrued):
+        p.interestRepaid += p.interestAccrued
+        p.principal = amount - p.interestAccrued
+        p.interestAccrued = 0
+    else:
+        p.interestRepaid += amount
+        p.interestAccrued -= amount
     
-    
-
     return p
 
 @external
@@ -179,8 +177,31 @@ def close(id: bytes32):
 
 @external
 def withdraw(id: bytes32,  amount: uint256): 
-    # assert amount <= self.credits[id].deposit + self.credits[id].interestRepaid - self.credits[id].principal 
-    IERC20(self.credits[id].token).transfer(self.credits[id].lender, amount)
+    p: Position = self._accrue(self.credits[id], id)
+    
+    assert amount <= p.deposit + p.interestRepaid - p.principal 
+
+    if amount > p.interestRepaid:
+        p.deposit -= amount - p.interestRepaid
+        p.interestRepaid = 0
+    else:
+        p.interestRepaid -= amount
+
+    self.credits[id] = p
+    IERC20(p.token).transfer(p.lender, amount)
+
+
+@external
+def borrow(id: bytes32,  amount: uint256): 
+    p: Position = self._accrue(self.credits[id], id)
+    
+    assert amount <= p.deposit - p.principal 
+    p.principal += amount
+
+    self.credits[id] = p
+    IERC20(p.token).transfer(self.borrower, amount)
+
+
 
 # @external
 # def claimAndRepay(claimToken: address, tradeData: Bytes[50000]) -> uint256: 

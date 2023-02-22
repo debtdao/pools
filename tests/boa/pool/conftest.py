@@ -3,16 +3,22 @@ import pytest
 from eth_utils import to_checksum_address
 from ..conftest import MAX_UINT
 
-# boa.interpret.set_cache_dir()
-# boa.reset_env()
+VESTING_RATE_COEFFICIENT = 10**18
+
+boa.interpret.set_cache_dir()
+boa.reset_env()
 
 @pytest.fixture(scope="module")
 def borrower():
     return boa.env.generate_address()
 
 @pytest.fixture(scope="module")
-def mock_line(borrower):
-    return boa.load("tests/mocks/MockLine.vy", borrower)
+def mock_line(_create_line, borrower):
+    return _create_line(borrower)
+
+@pytest.fixture(scope="module")
+def my_line(_create_line, me):
+    return _create_line(me)
 
 @pytest.fixture(scope="module")
 def pool_roles():
@@ -36,8 +42,17 @@ def pittance_fee_types(pool_fee_types):
     return pool_fee_types[1:] # cut performance and snitch fees of ends
 
 ###########
-# HoF Helper Func Fixtures
+# Higher Order Function Helper Fixtures
+# have to do this weird thing bc cant call functions directly when importing as fixtures
 ###########
+
+
+@pytest.fixture(scope="module")
+def _create_line():
+    def deploy(borrower):
+         return boa.load("tests/mocks/MockLine.vy", borrower)
+    return deploy
+
 
 @pytest.fixture(scope="module")
 def _deposit(pool, mock_line, base_asset):
@@ -49,17 +64,17 @@ def _deposit(pool, mock_line, base_asset):
 
 @pytest.fixture(scope="module")
 def _add_credit(pool, mock_line, base_asset, admin, me, _deposit):
-    def add_credit(amount, drate=0, frate=0, new_deposit=True):
+    def add_credit(amount, drate=0, frate=0, line=mock_line, new_deposit=True):
         if new_deposit:
             _deposit(amount, me)
-        id = pool.add_credit(mock_line, drate, frate, amount, sender=pool.owner())
+        id = pool.add_credit(line, drate, frate, amount, sender=pool.owner())
         return id
     return add_credit
 
 @pytest.fixture(scope="module")
-def _get_position(mock_line):
-    def get_position(id):
-        (deposit, principal, interestAccrued, intersetRepaid, decimals, token, lender, isOpen) = mock_line.credits(id)
+def _get_position():
+    def get_position(line, id):
+        (deposit, principal, interestAccrued, intersetRepaid, decimals, token, lender, isOpen) = line.credits(id)
         return {
             'deposit': deposit,
             'principal': principal,

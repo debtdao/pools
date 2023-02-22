@@ -8,6 +8,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from eip712.messages import EIP712Message
 from ..utils.events import _find_event
+from ..conftest import INIT_USER_POOL_BALANCE
 
 # TODO Ask ChatGPT to generate test cases in vyper
 
@@ -49,17 +50,19 @@ def test_token_info(base_asset, pool):
 
 
 # transfers properly update token balances
-@given(amount=st.integers(min_value=1, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=INIT_USER_POOL_BALANCE),
     is_send=st.integers(min_value=0, max_value=1))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_transfer(all_erc20_tokens, init_token_balances, me, admin, amount, is_send):
+def test_transfer(all_erc20_tokens, me, admin, amount, is_send):
     (sender, receiver) = (me, admin) if is_send else (admin, me)
 
     for token in all_erc20_tokens:
+        token.eval(f'self.balances[{sender}] = {amount}') # ensure tokens for test
         pre_sender_balance =  token.balanceOf(sender)
         pre_receiver_balance =  token.balanceOf(receiver)
 
         with boa.env.prank(sender):
+            token.eval(f'self.balances[{sender}] = {amount}')
             tx0 = token.transfer(receiver, amount, sender=sender)
 
             # validate that Transfer Log is correct

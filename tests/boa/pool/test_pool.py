@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
 from ..utils.events import _find_event
+from .conftest import VESTING_RATE_COEFFICIENT
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -17,14 +18,13 @@ ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev
 MAX_PITANCE_FEE = 200 # 2% in bps
 FEE_COEFFICIENT = 10000 # 100% in bps
 SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
-VESTING_RATE_COEFFICIENT = 10**18
+
 
 # TODO Ask ChatGPT to generate test cases in vyper
-# 1. depositing in pool increases total_assets
-# 1. add_credit to line decreaes increases total_deployed
-# 1. increase_credit to line decreaes increases total_deployed
+# 1. (done) depositing in pool increases total_assets
 
-# 1. (done) delegate priviliges on investment functions
+
+# 1. (done) owner priviliges on investment functions
 # 1. vault_investment goes up by _amount 
 # 1. only vault that gets deposited into has vault_investment changed
 # 1. emits InvestVault event X params
@@ -44,10 +44,8 @@ VESTING_RATE_COEFFICIENT = 10**18
 # 1. (done) fee updates in state
 # 1. (done) fee update emits SetXFee event with X params and FEE_TYPES.Y
 # 1. fee updates affect deposit/withdraw pricing
-# 1. fees emitted properly in RevenueGenerated
+# 1. (done) fees emitted properly in RevenueGenerated
 
-# major internal funcs
-# 1. _reduce_credit with 0 will only withdraw available interest (test withdrawable, )
 
 def test_assert_pool_constants(pool):
     """
@@ -315,13 +313,15 @@ def test_fuzz_set_vesting_rate_amount(pool, base_asset, admin, me, amount):
         amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_revenue_calculations_based_on_fees_state(
-    pool, pool_fee_types, admin, me, base_asset, pittance_fee, perf_fee, amount
+    pool, pool_fee_types, admin, me, base_asset, pittance_fee, perf_fee, amount,
+    _deposit,
 ):
     null_fees = dict(zip(pool_fee_types, (0,)*len(pool_fee_types)))
     for fee_type in pool_fee_types:
          # reset all fees so they dont pollute test. have separete test for composite fees
         pool.eval(SET_FEES_TO_ZERO)
-        _deposit(pool, base_asset, me, amount)
+        # TODO dynamic fee generating HuF
+        _deposit(amount, me)
         assert pool.accrued_fees() == 0
 
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
@@ -338,7 +338,8 @@ def test_revenue_calculations_based_on_fees_state(
 
         set_fee(fee_bps, sender=admin) # set fee so we generate revenue
         assert fee_bps == pool.eval(f'self.fees.{fee_type}')
-        _deposit(pool, base_asset, me, amount)
+        # TODO dynamic fee generating HuF
+        _deposit(amount, me)
         event = _find_event('RevenueGenerated', pool.get_logs())
         
         # TODO TEST - need to call right pool method to get right fees accrued like other tests
@@ -354,7 +355,8 @@ def test_revenue_calculations_based_on_fees_state(
         amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_revenue_calculations_with_multiple_fees(
-    pool, pool_fee_types, admin, me, base_asset, pittance_fee, perf_fee, amount
+    pool, pool_fee_types, admin, me, base_asset,
+    pittance_fee, perf_fee, amount
 ):
     """
     only 3 conditions where this happens i think
@@ -371,7 +373,7 @@ def test_revenue_calculations_with_multiple_fees(
     base_asset.mint(admin, amount)
     base_asset.approve(pool, amount, sender=admin)
     pool.deposit(amount, admin, sender=admin)
-    [deposit_rev, referral_rev] = pool.get_logs()[0:1]
+    [deposit_rev, referral_rev] = pool.get_logs()
     assert deposit_rev.args_map['fee_type'] == 2
     assert deposit_rev.args_map['receiver'] == admin
     assert deposit_rev.args_map['payer'] == pool
@@ -408,7 +410,11 @@ def test_revenue_calculations_with_multiple_fees(
 @given(amount=st.integers(min_value=1, max_value=10**25),
         pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE)) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_pittance_fees_emit_revenue_generated_event(pool, pittance_fee_types, admin, me, base_asset, pittance_fee, amount):
+def test_pittance_fees_emit_revenue_generated_event(
+    pool, pittance_fee_types, admin, me, base_asset,
+    pittance_fee, amount,
+    _deposit
+):
     total_accrued_fees = 0  # var accumulate fees across txs in loop
     for idx, fee_name in enumerate(pittance_fee_types):
         assert total_accrued_fees == pool.accrued_fees()
@@ -420,7 +426,9 @@ def test_pittance_fees_emit_revenue_generated_event(pool, pittance_fee_types, ad
         expected_rev = math.floor(((amount * pittance_fee) / FEE_COEFFICIENT))
         
         set_fee(pittance_fee, sender=admin) # set fee so we generate revenue
-        _deposit(pool, base_asset, me, amount)
+
+        # TODO dynamic fee generating HuF
+        _deposit(amount, me)
 
         
         # test deposit event before other pool state
@@ -536,12 +544,6 @@ def test_setting_fees_emits_standard_event(pool, pool_fee_types, admin, fee_bps)
         assert event.args_map['fee_type'] == 2**idx # boa logs are exponential
         assert pool.fees()[idx] == fee_bps
 
-def _deposit(pool, token, user, amount):
-    token.mint(user, amount)
-    token.approve(pool, amount, sender=user)
-    pool.deposit(amount, user, sender=user)
-    
-
 def _is_pittance_fee(fee_name: str) -> bool:
     if fee_name:
         match fee_name:
@@ -555,50 +557,3 @@ def _is_pittance_fee(fee_name: str) -> bool:
     #             return False
     #         case _:
     #             return True
-
-
-
-############################################%#
-########                              ########
-########  Locked Profit Calculations  ########
-########                              ########
-############################################%#
-
-@pytest.mark.pool
-@pytest.mark.slow
-@given(total_profit=st.integers(min_value=10**18, max_value=MAX_UINT),
-        vesting_time=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT * 2),
-        vesting_rate=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_calling_unlock_profit_releases_all_available_profit(
-    pool, me, base_asset, total_profit, vesting_time, vesting_rate
-):  
-    base_asset.mint(pool, total_profit)
-    pool.eval(f"self.total_assets = {total_profit}")
-    pool.eval(f"self.locked_profits = {total_profit}")
-    pool.eval(f"self.vesting_rate = {vesting_rate}")
-    # last_report set at contract deployment in fixture so should be `now`
-
-    # nothing should change until we call unlock_profit
-    assert pool.locked_profits() == total_profit
-    # max liquid assets is 0 bc all locked
-    assert pool.maxFlashLoan(base_asset) == 0
-    
-    boa.env.time_travel(vesting_time)
-
-    locked_profit = 0
-    if vesting_time is 0 or vesting_rate is 0:
-        locked_profit = total_profit
-    elif vesting_time * vesting_rate >= VESTING_RATE_COEFFICIENT: # wrong condition. check vesting_rate vs coeeficient and time compared to that
-        locked_profit = 0
-    else:
-         locked_profit = math.floor(total_profit - math.floor(((total_profit * vesting_time * vesting_rate) / VESTING_RATE_COEFFICIENT)))
-
-    pool.unlock_profits()
-
-    assert pool.locked_profits() == locked_profit
-    # max liquid should include unlocked profits now
-    assert pool.maxFlashLoan(base_asset) == total_profit - locked_profit
-
-    
-    

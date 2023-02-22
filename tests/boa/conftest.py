@@ -8,6 +8,8 @@ boa.reset_env()
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+INIT_POOL_BALANCE =  10**25  # 1M @ 18 decimals
+INIT_USER_POOL_BALANCE = int(INIT_POOL_BALANCE / 2)
 
 # dummy addresses. not active signers like Ape.accounts
 @pytest.fixture(scope="module")
@@ -49,27 +51,25 @@ def all_erc4626_tokens(pool):
 
 @pytest.fixture(scope="module")
 def init_token_balances(base_asset, pool, admin, me):
-    mint_amount = 10**25  # 1M @ 18 decimals
-
     # TODO dont be an idiot and use boa.eval instead of contract calls
 
     # mock token
-    base_asset.mint(me, mint_amount)
-    base_asset.mint(admin, mint_amount)
+    base_asset.mint(me, INIT_USER_POOL_BALANCE)
+    base_asset.mint(admin, INIT_USER_POOL_BALANCE)
 
     # mint lending tokens then deposit into pool to get
-    base_asset.mint(me, mint_amount, sender=me)
-    base_asset.approve(pool, mint_amount, sender=me)
-    shares = pool.deposit(mint_amount, me, sender=me)
+    base_asset.mint(me, INIT_USER_POOL_BALANCE, sender=me)
+    base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=me)
+    shares = pool.deposit(INIT_USER_POOL_BALANCE, me, sender=me)
         
-    base_asset.mint(admin, mint_amount, sender=admin)
-    base_asset.approve(pool, mint_amount, sender=admin)
-    shares2 = pool.deposit(mint_amount, admin, sender=admin)
+    base_asset.mint(admin, INIT_USER_POOL_BALANCE, sender=admin)
+    base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=admin)
+    shares2 = pool.deposit(INIT_USER_POOL_BALANCE, admin, sender=admin)
 
-    assert shares == mint_amount # shares should be 1:1
+    assert shares == INIT_USER_POOL_BALANCE # shares should be 1:1
     assert shares == shares2     # share price shouldnt change
 
-    return mint_amount
+    return INIT_USER_POOL_BALANCE
 
 # @pytest.fixture(scope="module")
 # def Permit(chain, token):

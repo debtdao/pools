@@ -838,7 +838,6 @@ def _mint(_to: address, _shares: uint256, _assets: uint256) -> bool:
 	@notice
 		Inc internal supply with new assets deposited and shares minted
 	"""
-	self.total_assets += _assets
 	self.total_supply += _shares
 	self._transfer(empty(address), _to, _shares)
 	return True
@@ -847,7 +846,6 @@ def _mint(_to: address, _shares: uint256, _assets: uint256) -> bool:
 def _burn(owner: address, _shares: uint256, _assets: uint256) -> bool:
 	"""
 	"""
-	self.total_assets -= _assets
 	self.total_supply -= _shares
 	self._transfer(owner, empty(address), _shares)
 	return True
@@ -1050,6 +1048,7 @@ def _deposit(
 	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
 
 	# use original price, opposite of _withdraw, requires them to deposit more _assets than current price post fee inflation
+	self.total_assets += _assets
 	self._mint(_receiver, shares, _assets)
 
 	assert IERC20(ASSET).transferFrom(msg.sender, self, _assets) # dev: asset.transferFrom() failed on deposit
@@ -1084,7 +1083,9 @@ def _withdraw(
 	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  convert(FEE_TYPES.WITHDRAW, uint256), self) # log potential fees for product analytics
 
 	#  remove _assets/shares from pool
+	self.total_assets -= _assets
 	self._burn(_receiver, shares + withdraw_fee, _assets)
+
 	self._erc20_safe_transfer(ASSET, _receiver, _assets)
 
 	log Withdraw(shares, _owner, _receiver, msg.sender, _assets)
@@ -1120,6 +1121,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 			fees_to_burn = total_to_burn
 
 		self.accrued_fees -= fees_to_burn
+		self.total_assets -= _assets
 		self._burn(self.owner, fees_to_burn, assets_burned)
 		# reducing supply during impairment means share price goes UP immediately
 
