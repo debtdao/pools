@@ -8,7 +8,8 @@ from hypothesis import strategies as st
 from datetime import timedelta
 from math import exp
 from ..conftest import MAX_UINT, INIT_USER_POOL_BALANCE
-from .conftest import VESTING_RATE_COEFFICIENT
+from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO
+
 
 # https://docs.apeworx.io/ape/stable/methoddocs/managers.html?highlight=project#module-ape.managers.project.manager
 
@@ -54,13 +55,33 @@ from .conftest import VESTING_RATE_COEFFICIENT
 ############################################%#
 
 @pytest.mark.pool
+@pytest.mark.share_price
+def test_pool_price_always_starts_1_to_1(pool):
+    assert pool.price() == 1
+
+@pytest.mark.pool
+@pytest.mark.share_price
+@given(amount=st.integers(min_value=10**18, max_value=MAX_UINT),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_pool_price_doesnt_change_on_deposit_withdraw_with_no_fees(pool, me, amount, _deposit):
+    assert pool.price() == 1
+    pool.eval(SET_FEES_TO_ZERO)
+    assert pool.fees() == (0,0,0,0,0,0)
+    _deposit(amount, me)
+    assert pool.price() == 1
+    pool.withdraw(amount, me, me, sender=me)
+    assert pool.price() == 1
+
+@pytest.mark.pool
+@pytest.mark.share_price
 @pytest.mark.slow
 @given(total_profit=st.integers(min_value=10**18, max_value=MAX_UINT),
         vesting_time=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT * 2),
         vesting_rate=st.integers(min_value=0, max_value=VESTING_RATE_COEFFICIENT),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_calling_unlock_profit_releases_all_available_profit(
-    pool, me, base_asset, total_profit, vesting_time, vesting_rate
+    pool, me, base_asset,
+    total_profit, vesting_time, vesting_rate,
 ):  
     base_asset.mint(pool, total_profit)
     pool.eval(f"self.total_assets = {total_profit}")
@@ -81,6 +102,7 @@ def test_calling_unlock_profit_releases_all_available_profit(
     elif vesting_time * vesting_rate >= VESTING_RATE_COEFFICIENT: # wrong condition. check vesting_rate vs coeeficient and time compared to that
         locked_profit = 0
     else:
+         # TODO TEST figure out how handle rounding errors btw py/vy
          locked_profit = math.floor(total_profit - math.floor(((total_profit * vesting_time * vesting_rate) / VESTING_RATE_COEFFICIENT)))
 
     pool.unlock_profits()
@@ -89,5 +111,3 @@ def test_calling_unlock_profit_releases_all_available_profit(
     # max liquid should include unlocked profits now
     assert pool.maxFlashLoan(base_asset) == total_profit - locked_profit
 
-   
-    

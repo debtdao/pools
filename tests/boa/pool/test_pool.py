@@ -9,7 +9,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
 from ..utils.events import _find_event
-from .conftest import VESTING_RATE_COEFFICIENT
+from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO
+from ..conftest import INIT_POOL_BALANCE
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -17,34 +18,35 @@ ZERO_BYTES32 = "0x00000000000000000000000000000000000000000000000000000000000000
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 MAX_PITANCE_FEE = 200 # 2% in bps
 FEE_COEFFICIENT = 10000 # 100% in bps
-SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
 
 
 # TODO Ask ChatGPT to generate test cases in vyper
-# 1. (done) depositing in pool increases total_assets
+# (done) depositing in pool increases total_assets
+# (done) max liquid == total assetes - deployed - locked profits
+# (done) max flash loan == max liquid
 
 
-# 1. (done) owner priviliges on investment functions
-# 1. vault_investment goes up by _amount 
-# 1. only vault that gets deposited into has vault_investment changed
-# 1. emits InvestVault event X params
-# 1. emits RevenueGenereated event with X params and FEE_TYPES.DEPOSIT
-# 1. investing in vault increased total_deployed by _amount
-# 1. investing in vault increases vault.balanceOf(pool) by shares returned in vault.deposit
-# 1. investing in vault increases vault.balanceOf(pool) by expected shares using _amount and pre-deposit share price
-# 1. 
-# 1. divesting vault decreases total_deployed
-# 1. divesting vault 
-# 1. emits DivestVault event with X params
-# 1. emits RevenueGenereated event with X params and FEE_TYPES.WITHDRAW
-# 1. divesting vault decreases vault.balanceOf(pool)
-# 1. divesting vault decreases vault.balanceOf(pool) by shares returned in vault.withdraw
-# 1. divesting vault decreases vault.balanceOf(pool) by expected shares using _amount and pre-withdraw share price
+# (done) owner priviliges on investment functions
+# vault_investment goes up by _amount 
+# only vault that gets deposited into has vault_investment changed
+# emits InvestVault event X params
+# emits RevenueGenereated event with X params and FEE_TYPES.DEPOSIT
+# investing in vault increased total_deployed by _amount
+# investing in vault increases vault.balanceOf(pool) by shares returned in vault.deposit
+# investing in vault increases vault.balanceOf(pool) by expected shares using _amount and pre-deposit share price
+# 
+# divesting vault decreases total_deployed
+# divesting vault 
+# emits DivestVault event with X params
+# emits RevenueGenereated event with X params and FEE_TYPES.WITHDRAW
+# divesting vault decreases vault.balanceOf(pool)
+# divesting vault decreases vault.balanceOf(pool) by shares returned in vault.withdraw
+# divesting vault decreases vault.balanceOf(pool) by expected shares using _amount and pre-withdraw share price
 
-# 1. (done) fee updates in state
-# 1. (done) fee update emits SetXFee event with X params and FEE_TYPES.Y
-# 1. fee updates affect deposit/withdraw pricing
-# 1. (done) fees emitted properly in RevenueGenerated
+# (done) fee updates in state
+# (done) fee update emits SetXFee event with X params and FEE_TYPES.Y
+# fee updates affect deposit/withdraw pricing
+# (done) fees emitted properly in RevenueGenerated
 
 
 def test_assert_pool_constants(pool):
@@ -557,3 +559,91 @@ def _is_pittance_fee(fee_name: str) -> bool:
     #             return False
     #         case _:
     #             return True
+
+
+
+
+
+
+@pytest.mark.slow
+@pytest.mark.pool
+@pytest.mark.invariant
+@given(deployed=st.integers(min_value=1, max_value=INIT_POOL_BALANCE),
+        locked=st.integers(min_value=1, max_value=INIT_POOL_BALANCE),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset, deployed, locked):    
+    def test_invariant():
+        total = pool.total_assets()
+        deployed = pool.total_deployed()
+        locked = pool.locked_profits()
+    
+        liquid = total - deployed - locked
+
+        # TODO TEST should this be its own "test_invariant_liquid_assets_are"
+        if deployed is 0 and locked is 0:
+            assert liquid == total
+        elif deployed is 0 and locked > 0:
+            assert liquid == total - locked
+        elif locked is 0 and deployed > 0:
+            assert liquid == total - deployed
+
+    # initial test
+    test_invariant()
+    total = pool.total_assets()
+    deployable = deployed if pool.total_assets() > deployed else total
+    # remove liquid assets from pool
+    pool.eval(f"self.total_deployed = {deployable}")
+    test_invariant()
+    # add extra deposits to pool for more liquid assets
+    pool.eval(f"self.total_assets += {deployed}")
+    test_invariant()
+    # add locked profit, should increase total_assetes to not fuckup accounting for whatever reason
+    pool.eval(f"self.total_assets = {locked}")    
+    pool.eval(f"self.locked_profits = {locked}")    
+    test_invariant()
+    # moar liquid funds
+    pool.eval(f"self.total_deployed = {0}")
+    test_invariant()
+    # drain the pool entirely
+    pool.eval(f"self.total_assets = {0}")    
+    pool.eval(f"self.locked_profits = {0}")    
+    test_invariant()
+
+
+@pytest.mark.slow
+@pytest.mark.pool
+@pytest.mark.invariant
+@given(deployed=st.integers(min_value=1, max_value=INIT_POOL_BALANCE),
+        locked=st.integers(min_value=1, max_value=INIT_POOL_BALANCE),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, locked):    
+    def test_invariant():
+        total = pool.total_assets()
+        deployed = pool.total_deployed()
+        locked = pool.locked_profits()
+    
+        liquid = total - deployed - locked
+
+        assert pool.maxFlashLoan(base_asset) == liquid
+    
+    # initial test
+    test_invariant()
+    total = pool.total_assets()
+    deployable = deployed if pool.total_assets() > deployed else total
+    # remove liquid assets from pool
+    pool.eval(f"self.total_deployed = {deployable}")
+    test_invariant()
+    # add extra deposits to pool for more liquid assets
+    pool.eval(f"self.total_assets += {deployed}")
+    test_invariant()
+    # add locked profit, should increase total_assetes to not fuckup accounting for whatever reason
+    pool.eval(f"self.total_assets = {locked}")    
+    pool.eval(f"self.locked_profits = {locked}")    
+    test_invariant()
+    # moar liquid funds
+    pool.eval(f"self.total_deployed = {0}")
+    test_invariant()
+    # drain the pool entirely
+    pool.eval(f"self.total_assets = {0}")    
+    pool.eval(f"self.locked_profits = {0}")    
+    test_invariant()

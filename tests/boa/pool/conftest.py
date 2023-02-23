@@ -4,6 +4,7 @@ from eth_utils import to_checksum_address
 from ..conftest import MAX_UINT
 
 VESTING_RATE_COEFFICIENT = 10**18
+SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
 
 boa.interpret.set_cache_dir()
 boa.reset_env()

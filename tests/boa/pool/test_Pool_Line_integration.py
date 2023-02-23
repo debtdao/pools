@@ -334,7 +334,8 @@ def test_anyone_can_call_collect_interest(
     assert p3['interestRepaid'] == expected_interest
 
     assert pool.locked_profits() == 0
-    pool.collect_interest(mock_line, id, sender=me)
+    rando = boa.env.generate_address()
+    pool.collect_interest(mock_line, id, sender=rando)
     assert pool.locked_profits() == expected_interest
     assert pool.total_assets() == INIT_POOL_BALANCE + amount + expected_interest
     
@@ -352,9 +353,9 @@ def test_only_owner_can_reduce_credit(
     id = _add_credit(100, 0, 0)
 
     with boa.reverts():
-        pool.reduce_credit(mock_line, id, 10_000)
+        pool.reduce_credit(mock_line, id, 10_000, sender=me)
     with boa.reverts():
-        pool.reduce_credit(mock_line, id, 0) # should still revert if no state change
+        pool.reduce_credit(mock_line, id, 0, sender=me) # should still revert if no state change
 
     pool.reduce_credit(mock_line, id, 0, sender=admin)
 
@@ -362,7 +363,7 @@ def test_only_owner_can_reduce_credit(
 @pytest.mark.pool
 @pytest.mark.pool_owner
 @pytest.mark.line_integration
-def test_reduce_credit_with_max_int_pulls_all_funds(
+def test_reduce_credit_with_max_uint_pulls_all_funds(
     pool, mock_line, my_line, admin, me, base_asset,
     _add_credit, _get_position, _repay,
 ):
@@ -404,23 +405,26 @@ def test_reduce_credit_with_max_int_pulls_all_funds(
 
 @pytest.mark.pool
 @pytest.mark.line_integration
+@pytest.mark.share_price
 @given(deposited=st.integers(min_value=10**18, max_value=10**25), # min_val = 1 so no off by one when adjusting values
-        withdrawn=st.integers(min_value=10**18, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+        withdrawn=st.integers(min_value=10**18, max_value=10**25),
+        timespan = st.integers(min_value=0, max_value=INTEREST_TIMESPAN_SEC)) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_total_deployed(
     pool, mock_line, admin, me, base_asset,
-    deposited, withdrawn,
+    deposited, withdrawn, timespan,
     _add_credit, _get_position, _repay,
 ):
+    og_pool_assets = pool.total_assets()
     facility_fee = 1000 # 10%
     drawn_fee = 0
     id = _add_credit(deposited, drawn_fee, facility_fee)
-    new_pool_balance = INIT_POOL_BALANCE + deposited
+    new_pool_balance = og_pool_assets + deposited
     p = _get_position(mock_line, id)
 
     assert p['deposit'] == deposited
 
-    boa.env.time_travel(seconds=INTEREST_TIMESPAN_SEC)
+    boa.env.time_travel(seconds=timespan)
     mock_line.accrueInterest(id)
     
     p2 = _get_position(mock_line, id)
@@ -439,11 +443,16 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
         if withdrawn < expected_interest:
             expected_interest = withdrawn
 
+        new_pool_assets = pool.total_assets()
         assert withdrawn_deposit == withdrawn - expected_interest
         assert withdraw_interest == expected_interest
         assert pool.total_deployed() == new_pool_balance - withdrawn + expected_interest
-        assert pool.total_assets() == new_pool_balance + expected_interest
+        assert new_pool_assets == new_pool_balance + expected_interest
         assert pool.locked_profits() == expected_interest # no matter the vesting_rate MUST have 100% at block of collection
+        
+        if timespan == 0: # if no time, ensure we only updated total_deployed
+            assert expected_interest == 0
+            assert og_pool_assets + deposited == new_pool_assets
         # assert pool.last_report() == boa.env.???()  # no matter the vesting_rate MUST have 100% at block of collection
 
 @pytest.mark.pool
@@ -474,11 +483,14 @@ def test_cant_reduce_credit_when_deposit_borrowed(
 
 @pytest.mark.pool
 @pytest.mark.line_integration
-def test_pool_can_open_multiple_positions(
+def test_pool_can_open_multiple_lending_positions(
     pool, mock_line, my_line, admin, me, base_asset,
     _add_credit, _get_position, _repay,
-    
 ):
+    """
+    necessarily implies can invest in multiple lines bc is constrained to
+    1 position per line with line's position id generator algo
+    """
     facility_fee = 1000 # 10%
     drawn_fee = 0 # 10%
     id = _add_credit(INIT_USER_POOL_BALANCE, 0, facility_fee)
@@ -495,20 +507,24 @@ def test_pool_can_open_multiple_positions(
 
 
 ### Pool Lender Tests
+
 # (done) only owner can call add_credit
 # (done) only owner can call increase_credit
 # (done) only owner can call set_rates
+# (done) only owner can call reduce_credit
 # (done) Pool MUST be able to open multiple positions on different lines.
-# (done) add_credit to line decreaes increases total_deployed
-# (done) increase_credit to line decreaes increases total_deployed
+# (done) add_credit to line increases total_deployed
+# (done) increase_credit to line increases total_deployed
 # (done) reduce_credit with max uint pulls all funds
 # (done) collecting profit multiple times stacks on top of each other in locked_profit
 # (done) cant reduce credit if funds borrowed
-# (done) 
+# (done) collect_interest to pool increases total assets and locked profit
+# (done) reduce_credit cant pull more funds than in position
+# (done) reduce_credit with interest increases total assets and locked profit and decreases total deployed
 
 # major internal funcs
 # (done via collect_interest) _reduce_credit with 0 will only withdraw available interest (test withdrawable, 
-# _reduce_credit with MAX_UINT will withdraw all available funds
+# (done) _reduce_credit with MAX_UINT will withdraw all available funds
 
 
 
