@@ -50,6 +50,14 @@ def all_erc4626_tokens(pool):
     return [pool]
 
 @pytest.fixture(scope="module")
+def _deposit(pool, base_asset):
+    def deposit(amount, receiver):
+        base_asset.mint(receiver, amount)
+        base_asset.approve(pool, amount, sender=receiver)
+        pool.deposit(amount, receiver, sender=receiver)
+    return deposit
+
+@pytest.fixture(scope="module")
 def init_token_balances(base_asset, pool, admin, me):
     # TODO dont be an idiot and use boa.eval instead of contract calls
 

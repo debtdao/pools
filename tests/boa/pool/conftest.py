@@ -56,14 +56,6 @@ def _create_line():
 
 
 @pytest.fixture(scope="module")
-def _deposit(pool, mock_line, base_asset):
-    def deposit(amount, receiver):
-        base_asset.mint(receiver, amount)
-        base_asset.approve(pool, amount, sender=receiver)
-        pool.deposit(amount, receiver, sender=receiver)
-    return deposit
-
-@pytest.fixture(scope="module")
 def _add_credit(pool, mock_line, base_asset, admin, me, _deposit):
     def add_credit(amount, drate=0, frate=0, line=mock_line, new_deposit=True):
         if new_deposit:

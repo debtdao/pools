@@ -54,7 +54,7 @@ def test_assert_pool_constants(pool):
     Test hardcoded constants in contract are what they're supposed to be
     """
     assert pool.FEE_COEFFICIENT() == 10000  # 100% in bps
-    assert pool.SNITCH_FEE() == 3000        # 30% in bps
+    assert pool.SNITCH_FEE() == 500        # 5% in bps
     # @notice 5% in bps. Max fee that can be charged for non-performance fee
     assert pool.MAX_PITTANCE_FEE() == 200   # 2% in bps
     assert pool.CONTRACT_NAME() == 'Debt DAO Pool'
@@ -71,7 +71,7 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
     assert pool.accrued_fees() == 0
     assert pool.min_deposit() == 0
     assert pool.total_deployed() == 0
-    assert pool.ASSET() == base_asset.address
+    assert pool.asset() == base_asset.address
     # ensure ownership and revenue is initialized properly
     assert pool.owner() == admin
     assert pool.pending_owner() == ZERO_ADDRESS
@@ -84,7 +84,7 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
     assert pool.last_report() == pool.eval('block.timestamp')
     # ensure vault logic is initialized properly
     assert pool.totalSupply() == 0
-    assert pool.total_assets()== 0
+    assert pool.totalAssets()== 0
 
 
 ############################################
@@ -96,35 +96,35 @@ def test_assert_initial_pool_state(pool, base_asset, admin):
 @pytest.mark.pool
 def test_depositing_in_pool_increases_total_assets(pool, admin, me, base_asset, init_token_balances):
     assert base_asset.balanceOf(pool) == init_token_balances * 2
-    assert pool.total_assets() == init_token_balances * 2
+    assert pool.totalAssets() == init_token_balances * 2
 
     base_asset.mint(me, 100)
     base_asset.approve(pool, 100, sender=me)
     pool.deposit(100, me, sender=me)
     assert base_asset.balanceOf(pool) == 100 + init_token_balances * 2
-    assert pool.total_assets() == 100 + init_token_balances * 2
+    assert pool.totalAssets() == 100 + init_token_balances * 2
 
     base_asset.mint(me, 100)
     base_asset.approve(pool, 100, sender=me)
     pool.mint(100, me, sender=me)
     assert base_asset.balanceOf(pool) == 200 + init_token_balances * 2
-    assert pool.total_assets() == 200 + init_token_balances * 2
+    assert pool.totalAssets() == 200 + init_token_balances * 2
     
 
 @pytest.mark.pool
 def test_withdrawing_from_pool_decreases_total_assets(pool, admin, me, base_asset, init_token_balances):
     assert base_asset.balanceOf(pool) == init_token_balances * 2
-    assert pool.total_assets() == init_token_balances * 2
+    assert pool.totalAssets() == init_token_balances * 2
 
     pool.withdraw(100, me, me, sender=me)
     assert base_asset.balanceOf(pool) == init_token_balances * 2 - 100
-    assert pool.total_assets() == init_token_balances * 2 - 100
+    assert pool.totalAssets() == init_token_balances * 2 - 100
     
     base_asset.mint(me, 100)
     base_asset.approve(pool, 100, sender=me)
     pool.redeem(100, me, me, sender=me)
     assert base_asset.balanceOf(pool) == init_token_balances * 2 - 200
-    assert pool.total_assets() == init_token_balances * 2 - 200
+    assert pool.totalAssets() == init_token_balances * 2 - 200
 
 
 @pytest.mark.pool
@@ -197,7 +197,7 @@ def test_fuzz_set_max_assets_amount(pool, base_asset, admin, me, amount, init_to
     pool.set_max_assets(amount, sender=admin)
     assert pool.max_assets() == amount
 
-    assert pool.total_assets() == init_token_balances * 2 # ensure clean state
+    assert pool.totalAssets() == init_token_balances * 2 # ensure clean state
     base_asset.mint(me, amount + 1, sender=me) # do + 1 to test max overflow
     base_asset.approve(pool, amount + 1, sender=me)
     pool.deposit(amount, me, sender=me) # up to limit should work
@@ -244,7 +244,7 @@ def test_fuzz_set_min_deposit_amount(pool, base_asset, admin, me, init_token_bal
     pool.set_min_deposit(amount, sender=admin)
     assert pool.min_deposit() == amount
 
-    assert pool.total_assets() == init_token_balances * 2 # ensure clean state
+    assert pool.totalAssets() == init_token_balances * 2 # ensure clean state
     base_asset.mint(me, amount, sender=me) # do + 1 to test max overflow
     base_asset.approve(pool, amount, sender=me)
 
@@ -573,24 +573,24 @@ def _is_pittance_fee(fee_name: str) -> bool:
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset, deployed, locked):    
     def test_invariant():
-        total = pool.total_assets()
+        total = pool.totalAssets()
         deployed = pool.total_deployed()
         locked = pool.locked_profits()
     
         liquid = total - deployed - locked
 
         # TODO TEST should this be its own "test_invariant_liquid_assets_are"
-        if deployed is 0 and locked is 0:
+        if deployed == 0 and locked == 0:
             assert liquid == total
-        elif deployed is 0 and locked > 0:
+        elif deployed == 0 and locked > 0:
             assert liquid == total - locked
-        elif locked is 0 and deployed > 0:
+        elif locked == 0 and deployed > 0:
             assert liquid == total - deployed
 
     # initial test
     test_invariant()
-    total = pool.total_assets()
-    deployable = deployed if pool.total_assets() > deployed else total
+    total = pool.totalAssets()
+    deployable = deployed if pool.totalAssets() > deployed else total
     # remove liquid assets from pool
     pool.eval(f"self.total_deployed = {deployable}")
     test_invariant()
@@ -618,7 +618,7 @@ def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, locked):    
     def test_invariant():
-        total = pool.total_assets()
+        total = pool.totalAssets()
         deployed = pool.total_deployed()
         locked = pool.locked_profits()
     
@@ -628,8 +628,8 @@ def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, lock
     
     # initial test
     test_invariant()
-    total = pool.total_assets()
-    deployable = deployed if pool.total_assets() > deployed else total
+    total = pool.totalAssets()
+    deployable = deployed if pool.totalAssets() > deployed else total
     # remove liquid assets from pool
     pool.eval(f"self.total_deployed = {deployable}")
     test_invariant()
@@ -647,3 +647,63 @@ def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, lock
     pool.eval(f"self.total_assets = {0}")    
     pool.eval(f"self.locked_profits = {0}")    
     test_invariant()
+
+
+
+@pytest.mark.slow
+@pytest.mark.ERC4626
+@given(shares=st.integers(min_value=10**18, max_value=MAX_UINT / 2),
+       assets=st.integers(min_value=10**18, max_value=MAX_UINT,))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_invariant_preview_incorporates_fees_into_share_price(pool, base_asset, me, admin, shares, assets):
+    pool.eval(SET_FEES_TO_ZERO)
+    pool.eval(f"self.total_assets = {assets}")
+    pool.eval(f"self.total_supply = {shares}")
+    pool.eval(f"self.balances[{me}] = {shares}")
+
+    redeemable = pool.previewRedeem(shares)
+    withdrawable = pool.previewWithdraw(assets)
+
+    print(f"pool asset/shres {assets}/{shares} redeem/withdraw {redeemable}/{withdrawable}")
+    print(f"")
+
+    assert redeemable == assets
+    assert withdrawable == shares
+
+    pool.set_withdraw_fee(100, sender=admin)
+
+    redeemable_w_fee = pool.previewRedeem(shares, sender=me)
+    withdrawable_w_fee = pool.previewWithdraw(assets, sender=me)
+    # TODO TEST figure out roundding errors and do exact check
+    assert redeemable_w_fee < assets and redeemable_w_fee > 0
+    assert withdrawable_w_fee < shares and withdrawable_w_fee > 0
+
+
+    mintable = pool.previewMint(shares)
+    depositable = pool.previewDeposit(assets)
+    assert mintable == assets
+    assert depositable == shares
+
+    pool.set_deposit_fee(100, sender=admin)
+
+    mintable_w_fee = pool.previewMint(shares, sender=me)
+    depositable_w_fee = pool.previewDeposit(assets, sender=me)
+    # TODO TEST figure out roundding errors and do exact check
+    assert mintable_w_fee < assets and mintable_w_fee > 0
+    assert depositable_w_fee < shares and depositable_w_fee > 0
+    
+    # if assets > 0:
+    #     pool.eval(f"self.total_deployed = {assets - 1}")
+    #     redeemable = pool.previewRedeem(shares)
+    #     withdrawable = pool.previewWithdraw(assets)
+        
+    #     assert redeemable == 1
+    #     assert withdrawable == 0
+
+
+
+# @pytest.mark.ERC4626
+# @given(amount=st.integers(min_value=0, max_value=(MAX_UINT / 4) * 3),)
+# @settings(max_examples=100, deadline=timedelta(seconds=1000))
+# def test_cant_withdraw_more_than_liquid(pool, base_asset, me, admin, init_token_balances, amount):
+

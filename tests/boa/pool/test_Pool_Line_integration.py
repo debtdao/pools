@@ -166,7 +166,7 @@ def test_collecting_interest_to_pool_increases_total_assets_and_locked_profit(
     
     p2 = _get_position(mock_line, id)
     expected_interest = p2['interestAccrued']
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount # ensure original accounting balance
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount # ensure original accounting balance
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
@@ -174,7 +174,7 @@ def test_collecting_interest_to_pool_increases_total_assets_and_locked_profit(
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == 1
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount + 1
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount + 1
     assert pool.locked_profits() == 1 # no matter the vesting_rate MUST have 100% at block of collection
 
 
@@ -200,7 +200,7 @@ def test_stacks_collected_profits(
     
     p2 = _get_position(mock_line, id)
     expected_interest = p2['interestAccrued']
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount # ensure original accounting balance
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount # ensure original accounting balance
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
@@ -209,14 +209,14 @@ def test_stacks_collected_profits(
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == expected_interest - 100
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount + expected_interest - 100
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount + expected_interest - 100
     assert pool.locked_profits() == expected_interest - 100 # no matter the vesting_rate MUST have 100% at block of collection
     
     _repay(id, 100)
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == 100
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount + expected_interest
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount + expected_interest
     assert pool.locked_profits() == expected_interest # no matter the vesting_rate MUST have 100% at block of collection
 
 
@@ -242,14 +242,14 @@ def test_reduce_credit_cant_pull_more_funds_than_in_position(
     
     p2 = _get_position(mock_line, id)
     expected_interest = p2['interestAccrued']
-    assert pool.total_assets() == amount # ensure original accounting balance
+    assert pool.totalAssets() == amount # ensure original accounting balance
     assert pool.total_deployed() == amount # ensure original accounting balance
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
     _repay(id, expected_interest)
     
-    print(f"pool assets/deployed/withdrawn {pool.total_assets()}  -- {pool.total_deployed()} -- {withdrawn}")
+    print(f"pool assets/deployed/withdrawn {pool.totalAssets()}  -- {pool.total_deployed()} -- {withdrawn}")
 
     if withdrawn > amount:
         with boa.reverts():
@@ -276,7 +276,7 @@ def test_reduce_credit_increases_total_assets_and_locked_profit_and_decreases_to
     
     p2 = _get_position(mock_line, id)
     expected_interest = p2['interestAccrued']
-    assert pool.total_assets() == amount # ensure original accounting balance
+    assert pool.totalAssets() == amount # ensure original accounting balance
     assert pool.total_deployed() == amount # ensure original accounting balance
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
@@ -297,7 +297,7 @@ def test_reduce_credit_increases_total_assets_and_locked_profit_and_decreases_to
         assert collected_deposit == withdrawn - expected_interest
 
         new_pool_assets = amount + expected_interest
-        assert pool.total_assets() == new_pool_assets
+        assert pool.totalAssets() == new_pool_assets
         assert pool.locked_profits() == expected_interest # no matter the vesting_rate MUST have 100% at block of collection
         assert pool.total_deployed() == amount - collected_deposit  # no matter the vesting_rate MUST have 100% at block of collection
 
@@ -337,7 +337,7 @@ def test_anyone_can_call_collect_interest(
     rando = boa.env.generate_address()
     pool.collect_interest(mock_line, id, sender=rando)
     assert pool.locked_profits() == expected_interest
-    assert pool.total_assets() == INIT_POOL_BALANCE + amount + expected_interest
+    assert pool.totalAssets() == INIT_POOL_BALANCE + amount + expected_interest
     
     p4 = _get_position(mock_line, id)
     assert p4['interestRepaid'] == 0 
@@ -399,7 +399,7 @@ def test_reduce_credit_with_max_uint_pulls_all_funds(
     assert pool.locked_profits() == 0
     pool.reduce_credit(mock_line, id, MAX_UINT, sender=admin)
     assert pool.locked_profits() == expected_interest
-    assert pool.total_assets() == (amount * 2) + expected_interest
+    assert pool.totalAssets() == (amount * 2) + expected_interest
     assert pool.total_deployed() == 0
 
 
@@ -415,7 +415,7 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
     deposited, withdrawn, timespan,
     _add_credit, _get_position, _repay,
 ):
-    og_pool_assets = pool.total_assets()
+    og_pool_assets = pool.totalAssets()
     facility_fee = 1000 # 10%
     drawn_fee = 0
     id = _add_credit(deposited, drawn_fee, facility_fee)
@@ -429,7 +429,7 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
     
     p2 = _get_position(mock_line, id)
     expected_interest = p2['interestAccrued']
-    assert pool.total_assets() == new_pool_balance
+    assert pool.totalAssets() == new_pool_balance
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
@@ -443,7 +443,7 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
         if withdrawn < expected_interest:
             expected_interest = withdrawn
 
-        new_pool_assets = pool.total_assets()
+        new_pool_assets = pool.totalAssets()
         assert withdrawn_deposit == withdrawn - expected_interest
         assert withdraw_interest == expected_interest
         assert pool.total_deployed() == new_pool_balance - withdrawn + expected_interest
