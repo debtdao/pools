@@ -72,11 +72,15 @@ interface IDebtDAOPool:
 ### Constants
 ### TODO only making public for testing purposes. ideally could remain private but still have easy access from tests
 
+# DEV NOTE: constants are public bc of error in boa that prevents reading them for tests 
+# https://github.com/vyperlang/titanoboa/issues/47
+# TODO fix bug in boa so we can remove
+
 # @notice 100% in bps. Used to divide after multiplying bps fees. Also max performance fee.
 FEE_COEFFICIENT: public(constant(uint256)) = 10000
-# @notice 30% in bps. snitch gets 1/3  of owners fees when liquidated to repay impairment.
-# IF owner fees exist when snitched on. Pool depositors are *guaranteed* to see a price increase, hence heavy incentive to snitches.
-SNITCH_FEE: public(constant(uint16)) = 3000
+# @notice 5% in bps. snitch gets 1/20 of owners fees when liquidated to repay impairment.
+# ONLY IF owner fees exist when snitched on.
+SNITCH_FEE: public(constant(uint16)) = 500
 # @notice 5% in bps. Max fee that can be charged for non-performance fee
 MAX_PITTANCE_FEE: public(constant(uint16)) = 200
 # @notice EIP712 contract name
@@ -84,17 +88,17 @@ CONTRACT_NAME: public(constant(String[13])) = "Debt DAO Pool"
 # @notice EIP712 contract version
 API_VERSION: public(constant(String[7])) = "0.0.001"
 # @notice EIP712 type hash
-DOMAIN_TYPE_HASH: public(constant(bytes32)) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
+DOMAIN_TYPE_HASH: constant(bytes32) = keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 # @notice EIP712 permit type hash
-PERMIT_TYPE_HASH: public(constant(bytes32)) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
+PERMIT_TYPE_HASH: constant(bytes32) = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
 # TODO rename VESTING_RATE_COEFFICIENT
 # rate per block of profit degradation. VESTING_RATE_COEFFICIENT is 100% per block
 VESTING_RATE_COEFFICIENT: public(constant(uint256)) = 10 ** 18
 
 # IERC20 vars
-NAME: public(immutable(String[50]))
-SYMBOL: public(immutable(String[18]))
-DECIMALS: public(immutable(uint8))
+NAME: immutable(String[50])
+SYMBOL: immutable(String[18])
+DECIMALS: immutable(uint8)
 # total amount of shares in pool
 total_supply: public(uint256)
 # balance of pool vault shares
@@ -104,16 +108,20 @@ allowances: HashMap[address, HashMap[address, uint256]]
 
 # IERC4626 vars
 # underlying token for pool/vault
-ASSET: public(immutable(address))
+ASSET: immutable(address)
 # total notional amount of underlying token owned by pool (may not be currently held in pool)
 total_assets: public(uint256)
 
 # share price logic stolen from yearn vyper vaults
 # vars - https://github.com/yearn/yearn-vaults/blob/74364b2c33bd0ee009ece975c157f065b592eeaf/contracts/Vault.vy#L239-L242
-last_report: public(uint256) 	# block.timestamp of last report
-locked_profits: public(uint256) 	# how much profit is locked and cant be withdrawn
+# block.timestamp of last report
+last_report: public(uint256)
+# how much profit is locked and cant be withdrawn
+locked_profits: public(uint256)
+# The rate of degradation in percent per second scaled to 1e18. 
 # lower the coefficient the slower the profit drip
-vesting_rate: public(uint256) # The rate of degradation in percent per second scaled to 1e18.  VESTING_RATE_COEFFICIENT is 100% per block
+# VESTING_RATE_COEFFICIENT is 100% per block
+vesting_rate: public(uint256)
 
 # IERC2612 Variables
 nonces: public(HashMap[address, uint256])
@@ -144,7 +152,7 @@ total_deployed: public(uint256)
 # total notional amount of ASSET borrowed from lines. Does not include interest owed.
 debt_principal: public(uint256)
 # amount of assets held by external 4626 vaults. used to calc profit/loss on non-line investments
-vault_investments: public(HashMap[address, uint256])
+vault_investments: HashMap[address, uint256]
 
 
 struct Fees:
@@ -1045,7 +1053,7 @@ def _deposit(
 	# call even if fees = 0 to log revenue for prod analytics
 	self._calc_and_mint_fee(self, _referrer, shares_referred, self.fees.referral, FEE_TYPES.REFERRAL)
 
-	# TODO TEST how deposit/refer fee inflatino affects the shares/asssets that they are *supposed* to lose
+	# TODO TEST how deposit/refer fee inflation affects the shares/asssets that they are *supposed* to lose
 
 	# use original price, opposite of _withdraw, requires them to deposit more _assets than current price post fee inflation
 	self.total_assets += _assets
@@ -1076,13 +1084,13 @@ def _withdraw(
 
 	# TODO TEST how  withdraw fee inflatino affects the shares/asssets that they are *supposed* to lose
 		
-	# minting adversly affects pool but not withdrawer who should be the one penalized.
+	# mintflation fees adversly affects pool but not withdrawer who should be the one penalized.
 	# make them burn extra shares instead of inflating total supply.
-	# use _calc not _mint_and_calc. 
+	# use _calc not _mint_and_calc + manually log revenue
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
 	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  convert(FEE_TYPES.WITHDRAW, uint256), self) # log potential fees for product analytics
 
-	#  remove _assets/shares from pool
+	# remove _assets/shares from pool
 	self.total_assets -= _assets
 	self._burn(_receiver, shares + withdraw_fee, _assets)
 
@@ -1210,7 +1218,7 @@ def _calc_locked_profit() -> uint256:
 				* locked_profit
 				/ VESTING_RATE_COEFFICIENT
 			)
-	else:        
+	else:
 		return 0
 
 
@@ -1459,6 +1467,11 @@ def symbol() -> String[18]:
 def decimals() -> uint8:
 	return DECIMALS
 
+@view
+@external
+def asset() -> address:
+	return ASSET
+
 @external
 @view
 def balanceOf(account: address) -> uint256:
@@ -1540,10 +1553,12 @@ def previewDeposit(_assets: uint256) -> uint256:
 	@dev 		INCLUSIVE of deposit fees (should be same as without deposit fees bc of mintflation)
 	@return 	shares returned when minting _assets
 	"""
-	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _assets) / share_price
+	if _assets == 0:
+		return 0
+
+	shares: uint256 = min(max_value(uint256) - self.total_assets,  _assets) / self._get_share_price()
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return free_shares - self._calc_fee(_assets / share_price, self.fees.deposit)
+	return shares - self._calc_fee(shares, self.fees.deposit)
 
 @external
 @view
@@ -1554,28 +1569,32 @@ def previewMint(_shares: uint256) -> uint256:
 	@dev 		INCLUSIVE of deposit fees (should be same as without deposit fees bc of mintflation)
 	@return 	assets required to mint _shares
 	"""
-	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(max_value(uint256) - self.total_assets, _shares * share_price)
+	if _shares == 0:
+		return 0
+
+	shares: uint256 = min(max_value(uint256) - self.total_supply, _shares)
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return (free_shares - self._calc_fee(free_shares, self.fees.deposit)) * share_price
+	return (shares - self._calc_fee(shares, self.fees.deposit)) * self._get_share_price()
 
 @external
 @view
 def previewWithdraw(_assets: uint256) -> uint256:
-	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(self._get_max_liquid_assets(), (max_value(uint256) - _assets)) / share_price
-	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return free_shares - self._calc_fee(_assets / share_price, self.fees.withdraw)
+	if _assets == 0:
+		return 0
+
+	max_withdrawable: uint256 = min(self.total_supply, _assets / self._get_share_price())
+	# TODO include withdraw fees to assets
+	return max_withdrawable - self._calc_fee(max_withdrawable, self.fees.withdraw)
 
 @external
 @view
 def previewRedeem(_shares: uint256) -> uint256:
-	share_price: uint256 =  self._get_share_price()
-	free_shares: uint256 = min(self._get_max_liquid_assets(), _shares * share_price)
+	if _shares == 0:
+		return 0
+
 	# TODO Dont think we need to include fees here since they are inflationary they shouldnt affect return values
-	return (free_shares - self._calc_fee(free_shares, self.fees.withdraw)) * share_price
-
-
+	max_redeemable: uint256 = min(self.total_supply, _shares)
+	return (max_redeemable - self._calc_fee(max_redeemable, self.fees.withdraw)) * self._get_share_price()
 
 ### Pool view
 @view
@@ -1606,7 +1625,9 @@ def owned_assets() -> uint256:
 def liquid_assets() -> uint256:
 	"""
 	@notice
-		All available assets that can be withdrawn by depositors
+		All available assets currently held inside the pool
+		that can be withdrawn by depositors
+		x = total_assets - total_deployed - locked_profit
 	@return
 		All available assets that can be withdrawn by depositors
 	"""
@@ -1650,7 +1671,7 @@ interface IERC4626:
 
 	# autogenerated state getters
 
-	# def asset() -> address: view
+	def asset() -> address: view
 
 	# manually generated getters
 
