@@ -786,12 +786,10 @@ def _approve(_owner: address, _spender: address, _amount: uint256) -> bool:
 
 @internal
 def _transfer(_sender: address, _receiver: address, _amount: uint256) -> bool:
-	# cant block transfer to self bc then we cant store fes for delegate
-	# prevent locking funds and yUSD/CREAM style share price attacks
+	# cant block transfer to self bc then we cant store fees for delegate
+	# prevents locking funds and yUSD/CREAM style share price attacks
 	# assert _receiver != self # dev: cant transfer to self
-	
-	# BUG: false positive when sender is initiating transfer themself
-	 # TODO rename _sender to _owner and use msg.sender as _sender? 
+
 	if _sender != empty(address):
 		# if not minting, then ensure _sender has balance
 		self.balances[_sender] -= _amount
@@ -914,18 +912,19 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 		We always reduce oustanding principal deposited in vault to 0 and then all withdrawals add to profit.
 	"""
 	is_loss: bool = True # optimistic pessimism
-	net: uint256 = 0	 # yay?
+	net: uint256 = 0
 	curr_shares: uint256 = IERC20(_vault).balanceOf(self)
 	principal: uint256 = self.vault_investments[_vault] # MAY be a 0 but thats OK 👍
 
 	if principal == 0 and curr_shares == 0: # nothing to withdraw
 		return (False, net) # technically no profit. 0 is cheaper to check too.
 
+	# if using shorthands, set amount to withdraw
 	amount: uint256 = _amount
 	if _amount == 0:
-		amount = principal
+		amount = principal # only withdraw initial principal
 	if _amount == max_value(uint256):
-		amount = IERC4626(_vault).previewWithdraw(_amount)
+		amount = IERC4626(_vault).previewWithdraw(_amount) # get all assets deposited in vvault
 
 	burned_shares: uint256 = IERC4626(_vault).withdraw(amount, self, self)
 	# assert burned_shares == expected_burn # ensure we are exiting at price we expect
@@ -943,15 +942,12 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 	elif amount > principal:
 		# withdrawing profit (+ maybe principal if != 0)
 		# TODO TEST that this math works fine if principal == 0 and its pure profit from the start or if its profit + principal
-		is_loss = False
 		net = amount - principal
-		self._update_shares(net) # add to locked_profit
 		self.total_deployed -= principal
 		self.vault_investments[_vault] = 0
-		# NOTE: delegate doesnt earn fees on 4626 strategies to incentivize line investment
+		self._update_shares(net) # add to locked_profit
 	else:
 		# only recouping initial deposit, principal > amount
-		is_loss = False
 		self.total_deployed -= amount
 		self.vault_investments[_vault] -= amount
 
@@ -1092,6 +1088,7 @@ def _withdraw(
 
 	# remove _assets/shares from pool
 	self.total_assets -= _assets
+	# TODO give to owner instead of burning?
 	self._burn(_receiver, shares + withdraw_fee, _assets)
 
 	self._erc20_safe_transfer(ASSET, _receiver, _assets)
@@ -1099,7 +1096,7 @@ def _withdraw(
 	log Withdraw(shares, _owner, _receiver, msg.sender, _assets)
 	log TrackSharePrice(share_price, share_price, self._get_share_APR()) # log price/apr for product analytics
 
-	return shares
+	return shares + withdraw_fee
 
 
 @internal
