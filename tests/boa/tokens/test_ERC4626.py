@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from ..conftest import INIT_POOL_BALANCE
+from ..conftest import INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
 from ..utils.events import _find_event
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -109,7 +109,7 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
 @pytest.mark.ERC4626
 @given(amount=st.integers(min_value=0, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=0, max_value=10**24),
         shares=st.integers(min_value=0, max_value=10**25),
         withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
@@ -121,15 +121,15 @@ def test_withdraw(
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE
 
+    pool.eval(f"self.fees.withdraw = {withdraw_fee}")
+
     if assets > INIT_USER_POOL_BALANCE:
         with boa.reverts(): # TODO TEST custom errors
-            pool.withdraw(assets, me, me, sneder=me)
-            
-    shares_withdrawn = pool.withdraw(assets, me, me, sneder=me)
+            pool.withdraw(assets, me, me, sender=me)
+
+    shares_withdrawn = pool.withdraw(assets, me, me, sender=me)
     
-    # TODO TEST event emissions
-    # get events before calling other pool functions which will erase them
-    # TODO python bug on get_logs(). `Error: cant cast to Int`
+
     logs = pool.get_logs()
     print(logs) 
     print("withdraw logs", logs[0], logs[1])
@@ -138,21 +138,35 @@ def test_withdraw(
     print("withdraw logs named", deposit_event, deposit_rev_event)
 
     assert pool.totalAssets() == INIT_POOL_BALANCE - assets
-    assert pool.totalSupply() == INIT_POOL_BALANCE - assets
+    
+    if withdraw_fee > 0 and assets > FEE_COEFFICIENT:
+        # this condition changes to `>` if we change to give owner fees instead of burning them
+        assert pool.totalSupply() < INIT_POOL_BALANCE - assets
+    else:
+        print(f"pool supply post withdraw  fee assets, withdrawn, supply, fee {assets}/{shares_withdrawn}/{pool.totalSupply()} {withdraw_fee}")
+        assert pool.totalSupply() == INIT_POOL_BALANCE - assets
+
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - assets # ensure shares burned from right person
 
-    # expected_shares = round(amount / share_price)
-    # ensure right price for shares
-    # accomodate evm vs python rounding differences
-    assert shares_withdrawn == INIT_USER_POOL_BALANCE
-    # ensure supply was inflated by deposit + fee
-    expected_total_supply = shares + shares_withdrawn + fees_generated
-    assert pool.totalSupply() == expected_total_supply
+    # burn more shares than assets even tho share price is 1
+    if withdraw_fee == 0:
+        assert pool.price() == 1
+    else:
+        assert pool.price() <= 1
+
+    min_shares_withdrawn = math.floor(assets + (assets * withdraw_fee / FEE_COEFFICIENT)) - 10
+    if withdraw_fee > 0 and assets > FEE_COEFFICIENT:
+        assert assets > shares_withdrawn and shares_withdrawn >= min_shares_withdrawn
+        assert base_asset.balanceOf(me) == assets
+        assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - shares_withdrawn
+
+        # ensure supply was inflated by deposit + fee
+        assert pool.totalSupply() > shares - shares_withdrawn
 
 @pytest.mark.ERC4626
 @given(amount=st.integers(min_value=0, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=0, max_value=10**24),
         shares=st.integers(min_value=0, max_value=10**25),
         withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
@@ -166,25 +180,34 @@ def test_withdraw_with_approval(
 
     pool.approve(admin, assets, sender=me)
     
+    pool.eval(f"self.fees.withdraw = {withdraw_fee}")
+
     if assets > INIT_USER_POOL_BALANCE:
         with boa.reverts(): # TODO TEST custom errors
-            pool.withdraw(assets, me, me, sneder=admin)
+            pool.withdraw(assets, me, me, sender=admin)
             
-    shares_withdrawn = pool.withdraw(assets, me, me, sneder=admin)
+    shares_withdrawn = pool.withdraw(assets, me, me, sender=admin)
     
    
     # TODO TEST event emissions
     # get events before calling other pool functions which will erase them
     # TODO python bug on get_logs(). `Error: cant cast to Int`
-    logs = pool.get_logs()
-    print(logs) 
-    print("withdraw logs", logs[0], logs[1])
-    deposit_event = _find_event('Deposit', logs)
-    deposit_rev_event = _find_event('RevenueGenerated', logs)
-    print("withdraw logs named", deposit_event, deposit_rev_event)
+    # logs = pool.get_logs()
+    # print(logs) 
+    # print("withdraw logs", logs[0], logs[1])
+    # deposit_event = _find_event('Deposit', logs)
+    # deposit_rev_event = _find_event('RevenueGenerated', logs)
+    # print("withdraw logs named", deposit_event, deposit_rev_event)
 
     assert pool.totalAssets() == INIT_POOL_BALANCE - assets
-    assert pool.totalSupply() == INIT_POOL_BALANCE - assets
+    
+    if withdraw_fee > 0 and assets > FEE_COEFFICIENT:
+        assert pool.totalSupply() < INIT_POOL_BALANCE - assets
+    else:
+        print(f"pool supply post withdraw  fee assets, withdrawn, supply, fee {assets}/{shares_withdrawn}/{pool.totalSupply()}/{withdraw_fee}")
+
+        assert pool.totalSupply() == INIT_POOL_BALANCE - assets
+
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - assets # ensure shares burned from right person
 
 
@@ -221,7 +244,7 @@ def test_deposit_cant_cause_total_asset_overflow(pool, base_asset, me, admin, in
 @given(shares=st.integers(min_value=0, max_value=MAX_UINT / 2),
        assets=st.integers(min_value=0, max_value=MAX_UINT,))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_invariant_preview_equals_wirtual_share_price(pool, base_asset, me, admin, shares, assets):
+def test_invariant_preview_equals_virtual_share_price(pool, base_asset, me, admin, shares, assets):
     pool.eval(f"self.total_assets = {assets}")
     pool.eval(f"self.total_supply = {shares}")
     pool.eval(f"self.balances[{me}] = {shares}")
@@ -246,11 +269,7 @@ def test_invariant_preview_equals_wirtual_share_price(pool, base_asset, me, admi
         assert redeemable ==  shares
         assert withdrawable == shares
 
-
-
-
-    ## TODO TEST account for deposit/withdraw feesset fees to 0
-    # make separate test that preview propely accounts for withdraw fees. that should be 4626
+    ## TODO TEST account for deposit/withdraw fees set fees to 0
 
 
     

@@ -1,5 +1,6 @@
 import ape
 import boa
+import math
 import pytest
 from eip712.messages import EIP712Message
 
@@ -9,7 +10,7 @@ boa.reset_env()
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 INIT_POOL_BALANCE =  10**25  # 1M @ 18 decimals
-INIT_USER_POOL_BALANCE = int(INIT_POOL_BALANCE / 2)
+INIT_USER_POOL_BALANCE = 5*10**24
 
 # dummy addresses. not active signers like Ape.accounts
 @pytest.fixture(scope="module")

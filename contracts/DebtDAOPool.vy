@@ -1040,7 +1040,7 @@ def _deposit(
 
 	# call even if fees = 0 to log revenue for prod analytics
 	self._calc_and_mint_fee(self, self.owner, shares, self.fees.deposit, FEE_TYPES.DEPOSIT)
-	
+
 	# dont mint referral fees if depositor isnt being referred by 3rd party
 	shares_referred: uint256 = 0
 	if _referrer != empty(address):
