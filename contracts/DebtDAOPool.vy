@@ -1029,8 +1029,9 @@ def _deposit(
 	_referrer: address = empty(address)
 ) -> uint256:
 	"""
-	adds shares to a user after depositing into vault
-	priviliged internal func
+	@notice 	- adds shares to a user after depositing into vault
+	@dev 		- priviliged internal func
+	@returns 	- amount of shares received for _assets
 	"""
 	assert _assets >= self.min_deposit # dev: fuck plebs
 	assert self.total_assets + _assets <= self.max_assets # dev: Pool max reached
@@ -1084,19 +1085,21 @@ def _withdraw(
 	# make them burn extra shares instead of inflating total supply.
 	# use _calc not _mint_and_calc + manually log revenue
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
-	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  convert(FEE_TYPES.WITHDRAW, uint256), self) # log potential fees for product analytics
+	# log potential fees for product analytics
+	log RevenueGenerated(_receiver, self, withdraw_fee, shares,  convert(FEE_TYPES.WITHDRAW, uint256), self)
 
+	burned_shares: uint256 = shares + withdraw_fee
 	# remove _assets/shares from pool
 	self.total_assets -= _assets
 	# TODO give to owner instead of burning?
-	self._burn(_receiver, shares + withdraw_fee, _assets)
+	self._burn(_owner, burned_shares, _assets)
 
 	self._erc20_safe_transfer(ASSET, _receiver, _assets)
 
-	log Withdraw(shares, _owner, _receiver, msg.sender, _assets)
-	log TrackSharePrice(share_price, share_price, self._get_share_APR()) # log price/apr for product analytics
+	log Withdraw(burned_shares, _owner, _receiver, msg.sender, _assets)
+	log TrackSharePrice(share_price, self._get_share_price(), self._get_share_APR()) # log price/apr for product analytics
 
-	return shares + withdraw_fee
+	return burned_shares
 
 
 @internal
@@ -1891,9 +1894,9 @@ event AcceptRevRecipient:
 
 event RevenueGenerated:		# standardize revenue reporting for offchain analytics
 	payer: indexed(address) # where fees are being paid from
-	token: address 			# where fees are being paid from
-	revenue: uint256 		# total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
-	amount: uint256			# tokens paid in fees, denominated in 
+	token: address 			# tokens fees were paid in
+	revenue: uint256 		# actual fees generated to `receiver` from assets
+	amount: uint256			# total assets that fees were generated on (user deposit, flashloan, loan principal, etc.)
 	fee_type: indexed(uint256) # maps to app specific fee enum or eventually some standard fee code system
 	receiver: indexed(address) # who is getting the fees paid
 
