@@ -748,8 +748,9 @@ def redeem(_shares: uint256, _receiver: address, _owner: address) -> uint256:
 	"""
 		@return - assets
 	"""
-	share_price: uint256 = self._get_share_price()
-	return self._withdraw(_shares * share_price, _owner, _receiver) * share_price
+	assets: uint256 = _shares * self._get_share_price()
+	self._withdraw(assets, _owner, _receiver)
+	return assets
 
 ### ERC20 Functions
 
@@ -973,6 +974,8 @@ def _reduce_credit(line: address, id: bytes32, amount: uint256) -> (uint256, uin
 	elif amount == max_value(uint256):
 		# MAX is shorthand for take all liquid assets
 		withdrawable = deposit + interest
+
+	assert withdrawable > 0 # TODO custom error
 
 	# set how much deposit vs interest we are collecting
 	# NOTE: MUST come after `amount` shorthand assignments
@@ -1646,9 +1649,6 @@ def liquid_assets() -> uint256:
 # 88 88       88  88,  "8b,   ,aa 88           88    88,    ,88 "8a,   ,aa "8b,   ,aa  
 # 88 88       88  "Y888 `"Ybbd8"' 88           88    `"8bbdP"Y8  `"Ybbd8"'  `"Ybbd8"'  
 
-
-
-
 from vyper.interfaces import ERC20 as IERC20
 
 interface IERC2612:
@@ -1929,8 +1929,8 @@ event UpdateProfitDegredation:
 # Testing events
 event named_uint:
 	num: indexed(uint256)
-	str: indexed(String[100])
+	str: String[200]
 
 event named_addy:
 	addy: indexed(address)
-	str: indexed(String[100])
+	str: String[200]
