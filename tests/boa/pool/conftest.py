@@ -10,6 +10,8 @@ VESTING_RATE_COEFFICIENT = 10**18
 SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
 ONE_YEAR_IN_SEC=60*60*24*365.25
 INTEREST_TIMESPAN_SEC = int(ONE_YEAR_IN_SEC / 12)
+DRATE=2000
+FRATE=1000
 
 boa.interpret.set_cache_dir()
 boa.reset_env()
@@ -107,15 +109,16 @@ def _repay(mock_line, base_asset, me):
 
 
 @pytest.fixture(scope="module")
-def _collect_interest(pool, mock_line, base_asset, admin, me, _add_credit, _repay, _get_position):
-    def collect_interest(amount, drate, frate, timespan, line=mock_line):
-        id = _add_credit(amount, drate, frate, line)
-        boa.env.time_travel(timespan)
+def _collect_interest(pool, mock_line, base_asset, admin, flash_borrower, _add_credit, _repay, _get_position):
+    def collect_interest(amount, drate, frate, timespan, line=mock_line, id=None):
+        if not id:
+            id = _add_credit(amount, drate, frate, line)
+        boa.env.time_travel(seconds=timespan)
+        line.accrueInterest(id)
         interest_earned = _get_position(line, id)['interestAccrued']
-        owed = amount + interest_earned
-        _repay(id, owed)
-        pool.reduce_credit(line, id, MAX_UINT, sender=admin) # return principal + interest back to pool
-        return interest_earned
+        _repay(id, interest_earned)
+        pool.collect_interest(line, id, sender=flash_borrower.address)
+        return interest_earned, id
         
     return collect_interest
 
@@ -127,42 +130,58 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
         """
         @return - [fee_type, amount_generated]
         """
-        print(f"generate revenue helper type/event  :  {fee_type}")
-        event = None
+        # print(f"generate revenue helper type/event  :  {fee_type}")
+
         match fee_type:
             case 'performance':
-                _collect_interest(amount, 2000, 1000, INTEREST_TIMESPAN_SEC)
-                # print("performancefee", 0)
-                event = _find_event_by({ "fee_type": 1 }, pool.get_logs())
+                interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+                # print("performance fee", interest, id)
+                return {
+                    'event': _find_event_by({ "fee_type": 1 }, pool.get_logs()),
+                    'position_id': id,
+                    'interest': interest,
+                }
             case 'deposit':
                 shares = _deposit(amount, me)
                 # print("deposit fee", 0)
-                event = _find_event_by({ "fee_type": 2 }, pool.get_logs())
+                return {
+                    'event': _find_event_by({ "fee_type": 2 }, pool.get_logs()),
+                    'shares': shares,
+                }
             case 'withdraw':
                 _deposit(amount, me) 
-                pool.withdraw(amount, me, me, sender=me)
+                shares = pool.withdraw(amount, me, me, sender=me)
                 # print("withdraw fee", 0)
-                event = _find_event_by({ "fee_type": 4 }, pool.get_logs())
+                return {
+                    'event': _find_event_by({ "fee_type": 4 }, pool.get_logs()),
+                    'shares': shares,
+                }
             case 'flash':
-                _deposit(amount, me) 
-                # pool.flashLoan(flash_borrower, base_asset, amount, "")
+                pool.flashLoan(flash_borrower, base_asset, amount, "")
                 # print("flash fee", 0)
-                event = _find_event_by({ "fee_type": 8 }, pool.get_logs())
+                return {
+                    'event': _find_event_by({ "fee_type": 8 }, pool.get_logs()),
+                }
             case 'collector':
-                _collect_interest(amount, 2000, 1000, INTEREST_TIMESPAN_SEC)
-                # print("collector fee", 0)
-                event = _find_event_by({ "fee_type": 16 }, pool.get_logs())
+                interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+                # print("performancefee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 1 }, pool.get_logs()),
+                    'position_id': id,
+                    'interest': interest,
+                }
             case 'referral':
-                _deposit(amount, me)
+                shares = _deposit(amount, me, flash_borrower) #random referrer
                 # print("referral fee", 0)
-                event = _find_event_by({ "fee_type": 32 }, pool.get_logs())
+                return {
+                    'event': _find_event_by({ "fee_type": 32 }, pool.get_logs()),
+                    'shares': shares,
+                }
             case 'snitch':
-                _deposit(amount, me)
-                # print("snitch fee", 0)
-                event = _find_event_by({ "fee_type": 64 }, pool.get_logs())
-
-        # print(f"generate revenue helper type/event  :  {fee_type}={event}")
-        return event.args_map if event != None else None
+                # TODO generate snitch fees
+                 return {
+                    'event':  _find_event_by({ "fee_type": 64 }, pool.get_logs()),
+                }
 
     return gen_rev
 

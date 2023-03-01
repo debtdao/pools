@@ -55,10 +55,13 @@ def all_erc4626_tokens(pool):
 
 @pytest.fixture(scope="module")
 def _deposit(pool, base_asset):
-    def deposit(amount, receiver):
+    def deposit(amount, receiver, referrer=None):
         base_asset.mint(receiver, amount)
         base_asset.approve(pool, amount, sender=receiver)
-        pool.deposit(amount, receiver, sender=receiver)
+        if referrer:
+            pool.depositWithReferral(amount, receiver, referrer, sender=receiver)
+        else:
+            pool.deposit(amount, receiver, sender=receiver)
     return deposit
 
 

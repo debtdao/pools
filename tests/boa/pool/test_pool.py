@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
 from ..utils.events import _find_event
-from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO
+from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO, DRATE, FRATE, INTEREST_TIMESPAN_SEC, ONE_YEAR_IN_SEC
 from ..conftest import INIT_POOL_BALANCE
 
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
@@ -312,48 +312,93 @@ def test_fuzz_set_vesting_rate_amount(pool, base_asset, admin, me, amount):
 @pytest.mark.rev_generator
 @given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITANCE_FEE),
         perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
-        amount=st.integers(min_value=1, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+        amount=st.integers(min_value=10**18, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_revenue_calculations_based_on_fees_state(
-    pool, pool_fee_types, admin, me, base_asset, pittance_fee, perf_fee, amount,
-    _gen_rev
+    pool, pool_fee_types, admin, me, base_asset, flash_borrower,
+    pittance_fee, perf_fee, amount,
+    _gen_rev, _collect_interest,
 ):
     null_fees = dict(zip(pool_fee_types, (0,)*len(pool_fee_types)))
     for fee_type in pool_fee_types:
          # reset all fees so they dont pollute test. have separete test for composite fees
         pool.eval(SET_FEES_TO_ZERO)
-        # TODO dynamic fee generating HuF
-        _gen_rev(fee_type, amount)
-        assert pool.accrued_fees() == 0
+        pool.eval("self.accrued_fees = 0")
 
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
         fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
-        expected_rev = (amount * fee_bps) / FEE_COEFFICIENT
-        if expected_rev < 1:
-            expected_rev = 0
-        else:
-            expected_rev = math.floor(expected_rev)
-        
-        expected_recipient = admin
-
-
-        # print("test fee rev generation", fee_bps, amount, expected_rev, fee_type)
 
         set_fee(fee_bps, sender=admin) # set fee so we generate revenue
         assert fee_bps == pool.eval(f'self.fees.{fee_type}')
-        # TODO dynamic fee generating HuF
-        event = _gen_rev(fee_type, amount)
+        print(f"\n\n\n")
+        rev_data = _gen_rev(fee_type, amount)
 
+        pittance_fee_rev = math.floor((amount * fee_bps) / FEE_COEFFICIENT)
+        
         # TODO TEST figure out why pool returns inconsistent events btw calls. probably boa thing
-        # assert event != None
+        # assert rev_data['event'] is not None
+        # TODO TEST THIS BLOCK NEVER GETS HIT
+
+        if rev_data['event'] == None:
+            print(f"NO EVENT FOR FEE {fee_type}/{rev_data}")
+            assert False
+
+        print(f"FEE EVENT :{fee_type}/{rev_data}")
+        event = rev_data['event'].args_map
         
-        if not event:
-            return
-        
+
         match fee_type:
-            case 'deposit':
-                assert pool.accrued_fees() == expected_rev
+            case 'performance':
+                print(f"REPORT FEE - {fee_type} - {event['fee_type']}")
+                assert event['fee_type'] == 1
+                assert event['token'] == pool.address
+                assert event['amount'] == rev_data['interest']
+                assert event['revenue'] == math.floor((rev_data['interest'] * fee_bps) / FEE_COEFFICIENT)
+                assert event['payer'] == pool.address
                 assert event['receiver'] == admin
+            case 'deposit':
+                print(f"REPORT FEE - {fee_type} - {event.fee_type}")
+                assert event['fee_type'] == 2
+                assert event['token'] == pool.address
+                assert event['amount'] == amount
+                assert event['revenue'] == pittance_fee_rev
+                assert event['payer'] == pool.address
+                assert event['receiver'] == admin
+            case 'withdraw':
+                print(f"REPORT FEE - {fee_type} - {event.fee_type}")
+                assert event['fee_type'] == 4
+                assert event['token'] == pool.address
+                assert event['amount'] == amount
+                assert event['revenue'] == pittance_fee_rev
+                assert event['payer'] == me
+                assert event['receiver'] == pool.address
+            case 'flash':
+                print(f"REPORT FEE - {fee_type} - {event.fee_type}")
+                assert event['fee_type'] == 8
+                assert event['token'] == base_asset.address
+                assert event['amount'] == amount
+                assert event['revenue'] == pittance_fee_rev
+                assert event['payer'] == flash_borrower.address
+                assert event['receiver'] == pool.address
+            case 'collector':
+                print(f"REPORT FEE - {fee_type} - {event.fee_type}")
+                assert event['fee_type'] == 16
+                assert event['token'] == base_asset.address
+                assert event['amount'] == amount
+                assert event['revenue'] == pittance_fee_rev
+                assert event['payer'] == pool.address
+                assert event['receiver'] == flash_borrower.address
+            case 'referral':
+                print(f"REPORT FEE - {fee_type} - {event.fee_type}")
+                assert event['fee_type'] == 32
+                assert event['token'] == pool.address
+                assert event['amount'] == amount
+                assert event['revenue'] == pittance_fee_rev
+                assert event['payer'] == pool.address
+                assert event['receiver'] == flash_borrower.address # random referrer for testing
+                
+                if amount > INTEREST_TIMESPAN_SEC:
+                    assert False
             # TODO TEST other fee types
 
         

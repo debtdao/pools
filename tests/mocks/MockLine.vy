@@ -131,6 +131,8 @@ def _accrue(p: Position, id: bytes32) -> Position:
     
 @internal
 def _repay(p: Position, id: bytes32, amount: uint256) -> Position:
+    assert amount <= p.principal + p.interestAccrued
+
     if(amount > p.interestAccrued):
         p.interestRepaid += p.interestAccrued
         p.principal = amount - p.interestAccrued
