@@ -2,10 +2,13 @@ import ape
 import boa
 import math
 import pytest
+import logging
+
 from eip712.messages import EIP712Message
 
 boa.interpret.set_cache_dir()
 boa.reset_env()
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
@@ -57,6 +60,7 @@ def _deposit(pool, base_asset):
         base_asset.approve(pool, amount, sender=receiver)
         pool.deposit(amount, receiver, sender=receiver)
     return deposit
+
 
 @pytest.fixture(scope="module")
 def init_token_balances(base_asset, pool, admin, me):

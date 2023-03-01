@@ -8,14 +8,11 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
 from ..utils.events import _find_event
+from .conftest import INTEREST_TIMESPAN_SEC
 from ..conftest import INIT_USER_POOL_BALANCE, INIT_POOL_BALANCE, MAX_UINT
 
-ONE_YEAR_IN_SEC=60*60*24*365.25
 BYTES32_STRING = 0x0000000000000000000000000000000000000000000000000000000000000000
 INTEREST_RATE_COEFFICIENT = 315576000000
-INTEREST_TIMESPAN_SEC = int(ONE_YEAR_IN_SEC / 12)
-
-
 
 ########################################
 ########################################

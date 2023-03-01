@@ -1,10 +1,15 @@
 import boa
+import logging
 import pytest
 from eth_utils import to_checksum_address
 from ..conftest import MAX_UINT
+from ..utils.events import _find_event, _find_event_by
+from boa.vyper.event import Event
 
 VESTING_RATE_COEFFICIENT = 10**18
 SET_FEES_TO_ZERO = "self.fees = Fees({performance: 0, deposit: 0, withdraw: 0, flash: 0, collector: 0, referral: 0})"
+ONE_YEAR_IN_SEC=60*60*24*365.25
+INTEREST_TIMESPAN_SEC = int(ONE_YEAR_IN_SEC / 12)
 
 boa.interpret.set_cache_dir()
 boa.reset_env()
@@ -20,6 +25,11 @@ def mock_line(_create_line, borrower):
 @pytest.fixture(scope="module")
 def my_line(_create_line, me):
     return _create_line(me)
+
+@pytest.fixture(scope="module")
+def flash_borrower(_create_line, me):
+    return boa.load("tests/mocks/FlashBorrower.vy")
+
 
 @pytest.fixture(scope="module")
 def pool_roles():
@@ -95,6 +105,66 @@ def _repay(mock_line, base_asset, me):
         
     return repay
 
+
+@pytest.fixture(scope="module")
+def _collect_interest(pool, mock_line, base_asset, admin, me, _add_credit, _repay, _get_position):
+    def collect_interest(amount, drate, frate, timespan, line=mock_line):
+        id = _add_credit(amount, drate, frate, line)
+        boa.env.time_travel(timespan)
+        interest_earned = _get_position(line, id)['interestAccrued']
+        owed = amount + interest_earned
+        _repay(id, owed)
+        pool.reduce_credit(line, id, MAX_UINT, sender=admin) # return principal + interest back to pool
+        return interest_earned
+        
+    return collect_interest
+
+
+
+@pytest.fixture(scope="module")
+def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) -> Event | None:
+    def gen_rev(fee_type, amount):
+        """
+        @return - [fee_type, amount_generated]
+        """
+        print(f"generate revenue helper type/event  :  {fee_type}")
+        event = None
+        match fee_type:
+            case 'performance':
+                _collect_interest(amount, 2000, 1000, INTEREST_TIMESPAN_SEC)
+                # print("performancefee", 0)
+                event = _find_event_by({ "fee_type": 1 }, pool.get_logs())
+            case 'deposit':
+                shares = _deposit(amount, me)
+                # print("deposit fee", 0)
+                event = _find_event_by({ "fee_type": 2 }, pool.get_logs())
+            case 'withdraw':
+                _deposit(amount, me) 
+                pool.withdraw(amount, me, me, sender=me)
+                # print("withdraw fee", 0)
+                event = _find_event_by({ "fee_type": 4 }, pool.get_logs())
+            case 'flash':
+                _deposit(amount, me) 
+                # pool.flashLoan(flash_borrower, base_asset, amount, "")
+                # print("flash fee", 0)
+                event = _find_event_by({ "fee_type": 8 }, pool.get_logs())
+            case 'collector':
+                _collect_interest(amount, 2000, 1000, INTEREST_TIMESPAN_SEC)
+                # print("collector fee", 0)
+                event = _find_event_by({ "fee_type": 16 }, pool.get_logs())
+            case 'referral':
+                _deposit(amount, me)
+                # print("referral fee", 0)
+                event = _find_event_by({ "fee_type": 32 }, pool.get_logs())
+            case 'snitch':
+                _deposit(amount, me)
+                # print("snitch fee", 0)
+                event = _find_event_by({ "fee_type": 64 }, pool.get_logs())
+
+        # print(f"generate revenue helper type/event  :  {fee_type}={event}")
+        return event.args_map if event != None else None
+
+    return gen_rev
 
 
 # @pytest.fixture(scope="session")
