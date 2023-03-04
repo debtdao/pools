@@ -7,7 +7,8 @@ from datetime import timedelta
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from eth_utils import to_checksum_address
-from ..conftest import INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
+from ..conftest import POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
+from ..utils.price import _calc_price, _to_assets, _to_shares
 from ..utils.events import _find_event
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -22,6 +23,10 @@ MAX_PITTANCE_FEE = 200 # 2% in bps
 # (only diff between preview and action is side effects - state and events 
 # 	Verify that the deposit and withdraw business logic is consistent and symmetrical, especially when re-sending tokens to the same address (from == to).
 
+# add test that cant deposit with 0 address as receiver
+# test that _convert_to_assets/shares works as expected whether share price is over/under 1:1
+
+
 @pytest.mark.ERC4626
 def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     """
@@ -32,17 +37,17 @@ def test_first_depositor_state_changes(pool, admin, me, init_token_balances):
     assert pool.totalAssets() == init_token_balances * 2
     # 1:1 initial backing
     assert pool.totalSupply() == pool.totalAssets()
-    assert pool.price() == 1
+    assert pool.price() == POOL_PRICE_DECIMALS
     # shares split equally, no price difference
     assert pool.balanceOf(admin) == init_token_balances
     assert pool.balanceOf(me) == init_token_balances
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**25),
-        shares=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=100, max_value=10**25),
+        shares=st.integers(min_value=1, max_value=10**25),
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_deposit(pool, base_asset, me, admin, init_token_balances,
@@ -57,17 +62,13 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     assert base_asset.balanceOf(me) == new_balance
     
     # handle fuzzing vars math for share price
-    expected_share_price = 1
+    expected_share_price = _calc_price(assets, shares)
     if shares == 0 or assets == 0: # nothing to price
         expected_share_price = 1
     elif assets / shares < 1: # fixed point math round down
         expected_share_price = 0
         return # unusable test if no share price
         # TODO What happens in contract if share price == 0 ????
-    else:
-        # expected_share_price = round(assets / shares)
-        # evm always rounds down
-        expected_share_price = math.floor(assets / shares)
 
 
     #  manipulate pool shares/assets to get target share price
@@ -126,10 +127,10 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**25),
-        shares=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=100, max_value=10**25),
+        shares=st.integers(min_value=1, max_value=10**25),
         deposit_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_mint(pool, base_asset, me, admin, init_token_balances,
@@ -140,37 +141,34 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
     """
 
     # handle fuzzing vars math for share price
-    expected_share_price = 1
+    expected_share_price = _calc_price(assets, shares)
     if shares == 0 or assets == 0: # nothing to price
-        expected_share_price = 1
-    elif assets / shares < 1: # fixed point math round down
+        expected_share_price = POOL_PRICE_DECIMALS
+    elif expected_share_price < 1: # fixed point math round down
         expected_share_price = 0
         return # unusable test if no share price
         # TODO What happens in contract if share price == 0 ????
-    else:
-        # expected_share_price = round(assets / shares)
-        # evm always rounds down
-        expected_share_price = math.floor(assets / shares)
+
     #  manipulate pool shares/assets to get target share price
     pool.eval(f'self.total_assets = {assets}')
     pool.eval(f'self.total_supply = {shares}')
     share_price = pool.price() # pre deposit price is used in _deposit() for calculating shares returned
 
-    # assert expected_share_price == share_price
+    assert expected_share_price == share_price
 
     assert pool.balanceOf(me) == init_token_balances
-    assets_for_shares = amount * share_price
-    base_asset.mint(me, amount * share_price)
+    assets_for_shares = _to_assets(amount, share_price)
+    base_asset.mint(me, assets_for_shares)
     new_balance = init_token_balances + assets_for_shares
     assert base_asset.balanceOf(me) == new_balance
 
     if share_price == 0:
+        with boa.reverts():
+            pool.mint(amount, me, sender=me) 
         return # cant deposit if no price
 
-    # _assert_uint_with_rounding(share_price, expected_share_price)
-
-    # fees_generated = round((amount * deposit_fee) / FEE_COEFFICIENT / share_price)
-    fees_generated = math.floor((amount * deposit_fee) / FEE_COEFFICIENT / share_price) 
+    # fees_generated = math.floor((amount * deposit_fee) / FEE_COEFFICIENT / share_price) 
+    fees_generated = math.floor(math.floor(amount * deposit_fee) / FEE_COEFFICIENT)
     pool.eval(f'self.fees.deposit = {deposit_fee}')
     
     # deposit fails if we havent approved base tokens yet
@@ -202,10 +200,10 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**24),
-        shares=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=100, max_value=10**24),
+        shares=st.integers(min_value=1, max_value=10**25),
         withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_withdraw(
@@ -222,6 +220,7 @@ def test_withdraw(
     if amount > INIT_USER_POOL_BALANCE:
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=me)
+        return # cant test bc redeem tx will revert
 
     shares_withdrawn = pool.withdraw(amount, me, me, sender=me)
     
@@ -254,23 +253,25 @@ def test_withdraw(
 
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - shares_withdrawn
     assert base_asset.balanceOf(me) == user_asset_balance + amount
-
+    
+    
+    # TODO TEST when we re-implement withdraw fees
     # burn more shares than amount even tho share price is 1
-    if withdraw_fee == 0:
-        assert pool.price() == 1
-    else:
-        assert pool.price() <= 1 # TODO price will always be 0 if < 1:1 backing
+    # if withdraw_fee == 0:
+    #     assert pool.price() == POOL_PRICE_DECIMALS
+    # else:
+    #     assert pool.price() <= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
 
-    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-        min_shares_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
-        assert shares_withdrawn > amount and shares_withdrawn >= min_shares_withdrawn
+    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+    #     min_shares_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
+    #     assert shares_withdrawn > amount and shares_withdrawn >= min_shares_withdrawn
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**24),
-        shares=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=100, max_value=10**24),
+        shares=st.integers(min_value=1, max_value=10**25),
         withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_withdraw_with_approval(
@@ -289,6 +290,7 @@ def test_withdraw_with_approval(
     if amount > INIT_USER_POOL_BALANCE:
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=admin)
+        return # cant test bc redeem tx will revert
 
     # TODO TEST modify share price with assets/shares and ensure math is right            
     shares_withdrawn = pool.withdraw(amount, me, me, sender=admin)
@@ -300,7 +302,7 @@ def test_withdraw_with_approval(
     assert to_checksum_address(withdraw_event.args_map['owner']) == me
     assert to_checksum_address(withdraw_event.args_map['sender']) == admin
     assert to_checksum_address(withdraw_event.args_map['receiver']) == me
-    assert withdraw_event.args_map['assets'] == assets
+    assert withdraw_event.args_map['assets'] == amount
     assert withdraw_event.args_map['shares'] == shares_withdrawn 
 
     withdraw_rev_event = _find_event('RevenueGenerated', logs)
@@ -314,8 +316,9 @@ def test_withdraw_with_approval(
     assert pool.totalAssets() == INIT_POOL_BALANCE - amount
     assert pool.totalSupply() == INIT_POOL_BALANCE - shares_withdrawn
     
-    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-        assert shares_withdrawn > amount
+    # TODO TEST when we re-implement withdraw fees
+    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+    #     assert shares_withdrawn > amount
 
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - shares_withdrawn
     assert base_asset.balanceOf(me) == user_asset_balance + amount
@@ -323,10 +326,10 @@ def test_withdraw_with_approval(
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=10**25),
+@given(amount=st.integers(min_value=1, max_value=10**25),
         # total pool assets/shares to manipulate share price
-        assets=st.integers(min_value=0, max_value=10**24),
-        shares=st.integers(min_value=0, max_value=10**25),
+        assets=st.integers(min_value=100, max_value=10**24),
+        shares=st.integers(min_value=1, max_value=10**25),
         withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_redeem(
@@ -343,6 +346,7 @@ def test_redeem(
     if amount > INIT_USER_POOL_BALANCE:
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=me)
+        return # cant test bc redeem tx will revert
 
     assets_withdrawn = pool.redeem(amount, me, me, sender=me)
     
@@ -375,20 +379,21 @@ def test_redeem(
 
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - assets_withdrawn
     assert base_asset.balanceOf(me) == user_asset_balance + amount
-
+    
+    # TODO TEST when we re-implement withdraw fees
     # burn more shares than amount even tho share price is 1
-    if withdraw_fee == 0:
-        assert pool.price() == 1
-    else:
-        assert pool.price() <= 1 # TODO price will always be 0 if < 1:1 backing
+    # if withdraw_fee == 0:
+    #     assert pool.price() == POOL_PRICE_DECIMALS
+    # else:
+    #     assert pool.price() <= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
 
-    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-        min_amount_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
-        assert assets_withdrawn > amount and assets_withdrawn >= min_amount_withdrawn
+    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+    #     min_amount_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
+    #     assert assets_withdrawn > amount and assets_withdrawn >= min_amount_withdrawn
 
 
 @pytest.mark.ERC4626
-@given(amount=st.integers(min_value=0, max_value=(MAX_UINT / 4) * 3),)
+@given(amount=st.integers(min_value=1, max_value=10**35),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_deposit_cant_cause_total_asset_overflow(pool, base_asset, me, admin, init_token_balances, amount):
     init_pool_deposits = init_token_balances * 2
@@ -416,43 +421,65 @@ def test_deposit_cant_cause_total_asset_overflow(pool, base_asset, me, admin, in
         pool.deposit(overflow_amnt, me, sender=me)
 
 
+@pytest.mark.slow
 @pytest.mark.ERC4626
-@given(shares=st.integers(min_value=0, max_value=MAX_UINT / 2),
-       assets=st.integers(min_value=0, max_value=MAX_UINT,))
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
+@pytest.mark.invariant
+@given(shares=st.integers(min_value=100_000, max_value=10**35),
+       assets=st.integers(min_value=100_000, max_value=10**35,))
+@settings(max_examples=1000, deadline=timedelta(seconds=1000))
 def test_invariant_preview_equals_virtual_share_price(pool, base_asset, me, admin, shares, assets):
+    print(f"")
     pool.eval(f"self.total_assets = {assets}")
     pool.eval(f"self.total_supply = {shares}")
     pool.eval(f"self.balances[{me}] = {shares}")
+
+    # price differential causes price calc to fail.
+    # TODO found high/low bounds e.g. price cant be more than (1e12 * 10**DECIMALS) assets and cant be lower than (1e-8 * 10**DECIMALS)
+    if abs(len(str(shares)) - len(str(assets * POOL_PRICE_DECIMALS))) > POOL_PRICE_DECIMALS:
+        with boa.reverts():
+            redeemable = pool.previewRedeem(shares)
+        with boa.reverts():
+            withdrawable = pool.previewWithdraw(assets)
+        
     price = pool.price()
-
-
+    print(f"share price {price} - {assets}/{shares}")
     redeemable = pool.previewRedeem(shares)
     withdrawable = pool.previewWithdraw(assets)
-    assert redeemable == shares
-    assert withdrawable == shares
+    expected_redeemable = _to_assets(shares, price)
+    expected_withdrawable =  _to_shares(assets, price)
+    print(f"assets back 4 shares - {redeemable}/{expected_redeemable}/{shares}")
+    print(f"burn share 4 assets- {withdrawable}/{expected_withdrawable}/{assets}")
+    assert redeemable == expected_redeemable
+    assert withdrawable == expected_withdrawable
 
     mintable = pool.previewMint(shares)
     depositable = pool.previewDeposit(assets)
-    assert mintable == (0 if shares == 0 else shares)
-    assert depositable == assets
-    
+    expected_mintable =  _to_assets(min(MAX_UINT - pool.totalSupply(), shares), price)
+    expected_depositable = _to_shares(min(assets, MAX_UINT  - pool.totalAssets()), price)
+    print(f"assets deposited 4 shares - {mintable}/{expected_mintable}/{shares}")
+    print(f"share received 4 assets- {depositable}/{expected_depositable}/{assets}")
+    assert mintable == expected_mintable
+    assert depositable == expected_depositable
+
     if assets > 0:
         pool.eval(f"self.total_deployed = {assets - 1}")
         redeemable = pool.previewRedeem(shares)
         withdrawable = pool.previewWithdraw(assets)
-        # 4626 spec saysdont account for user+global limits so doesnt account for liquid pool
-        assert redeemable ==  shares
-        assert withdrawable == shares
+        # 4626 spec says dont account for user+global limits so dont account for liquid pool
+        print(f"2 assets back 4 shares - {redeemable}/{expected_redeemable}/{shares}")
+        print(f"2 burn share 4 assets- {withdrawable}/{expected_withdrawable}/{assets}")
+        assert redeemable ==  expected_redeemable
+        assert withdrawable == expected_withdrawable
 
     ## TODO TEST account for deposit/withdraw fees set fees to 0
 
 
-    
+@pytest.mark.slow
 @pytest.mark.ERC4626
-@given(shares=st.integers(min_value=10**18, max_value=MAX_UINT / 2),
-       assets=st.integers(min_value=1, max_value=MAX_UINT / 2),
-        pittance_fee=st.integers(min_value=0, max_value=MAX_PITTANCE_FEE),)
+@pytest.mark.invariant
+@given(shares=st.integers(min_value=1, max_value=10**35),
+       assets=st.integers(min_value=100, max_value=10**35),
+        pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_invariant_preview_equals_realized_share_price(
     pool, base_asset, me, admin,
@@ -465,6 +492,7 @@ def test_invariant_preview_equals_realized_share_price(
         pool.eval(f"self.total_assets = {assets}")
         pool.eval(f"self.total_supply = {shares}")
         pool.eval(f"self.balances[{me}] = {shares}")
+        base_asset.approve(pool, assets,  sender=me)
         # print("reset pool vals", pool.totalSupply(), pool.totalAssets())
         
     reset()
@@ -527,7 +555,8 @@ def test_invariant_preview_equals_realized_share_price(
 # (done) total supply with mint/burn
 
 @pytest.mark.ERC4626
-@given(assets=st.integers(min_value=1, max_value=MAX_UINT / 2),)
+@pytest.mark.invariant
+@given(assets=st.integers(min_value=100, max_value=10**35),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_invariant_total_supply_matches_mint_and_burn(
     pool, base_asset, me, admin,

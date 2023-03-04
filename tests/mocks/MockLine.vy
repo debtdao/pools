@@ -4,7 +4,7 @@ from vyper.interfaces import ERC20 as IERC20
 interface ISecuredLine:
     def borrower() -> address: pure
     def ids(index: uint256) -> bytes32: view
-    def status() -> uint256: view
+    def status() -> uint8: view
     def credits(id: bytes32) -> Position: view
     def available(id: bytes32) -> (uint256, uint256): view
 
@@ -51,16 +51,23 @@ struct Rate:
 INTEREST_RATE_COEFFICIENT: constant(uint256) = 315576000000 # (100% in bps * 364.25 days in seconds)
 
 ids: public(uint256)
-status: public(uint256)
+status: public(uint8)
 borrower: public(address)
 credits: public(HashMap[bytes32, Position])
 rates: public(HashMap[bytes32, Rate])
+
+STATUS_UNINITIALIZED: constant(uint8) = 0
+STATUS_ACTIVE: constant(uint8) = 1
+STATUS_LIQUIDATABLE: constant(uint8) = 2
+STATUS_REPAID: constant(uint8) = 3
+STATUS_INSOLVENT: constant(uint8) = 4
 
 
 @external
 def __init__(_borrower: address):
     self.status = 1
     self.borrower = _borrower
+    self.status = STATUS_ACTIVE
 
 @external
 def available(id: bytes32) -> (uint256, uint256): 
@@ -135,7 +142,7 @@ def _repay(p: Position, id: bytes32, amount: uint256) -> Position:
 
     if(amount > p.interestAccrued):
         p.interestRepaid += p.interestAccrued
-        p.principal = amount - p.interestAccrued
+        p.principal -= amount - p.interestAccrued
         p.interestAccrued = 0
     else:
         p.interestRepaid += amount
@@ -204,6 +211,32 @@ def borrow(id: bytes32,  amount: uint256):
     IERC20(p.token).transfer(self.borrower, amount)
 
 
+@external
+def declareInsolvent(): 
+    self.status = STATUS_INSOLVENT
+
+@external
+def reset_position(id: bytes32): 
+    self.credits[id] = Position({
+        deposit: 0,
+        principal: 0,
+        interestAccrued: 0,
+        interestRepaid: 0,
+        decimals: 0,
+        token: empty(address),
+        lender: empty(address),
+        isOpen: False,
+    })
+
+
+@external
+def declareLiquidatable(): 
+    self.status = STATUS_LIQUIDATABLE
+
+@view
+@external
+def computeId(lender: address,  token: address) -> bytes32: 
+    return keccak256(_abi_encode(self, lender, token))
 
 # @external
 # def claimAndRepay(claimToken: address, tradeData: Bytes[50000]) -> uint256: 

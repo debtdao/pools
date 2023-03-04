@@ -6,10 +6,12 @@ from boa.vyper.contract import BoaError, VyperContract
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
+from eth_utils import to_checksum_address
 from datetime import timedelta
-from ..utils.events import _find_event
-from .conftest import INTEREST_TIMESPAN_SEC
-from ..conftest import INIT_USER_POOL_BALANCE, INIT_POOL_BALANCE, MAX_UINT
+from ..utils.events import _find_event, _find_event_by
+from ..utils.price import _to_assets, _to_shares, _calc_price
+from .conftest import INTEREST_TIMESPAN_SEC, DRATE, FRATE, FEE_COEFFICIENT, MAX_PITTANCE_FEE, NULL_POSITION
+from ..conftest import ZERO_ADDRESS, INIT_USER_POOL_BALANCE, INIT_POOL_BALANCE, MAX_UINT, POOL_PRICE_DECIMALS
 
 BYTES32_STRING = 0x0000000000000000000000000000000000000000000000000000000000000000
 INTEREST_RATE_COEFFICIENT = 315576000000
@@ -64,9 +66,9 @@ def test_pool_can_deposit_to_line(
 
     position = _get_position(mock_line, id)
 
-    assert position['lender'] == pool.address
+    assert to_checksum_address(position['lender']) == pool.address
     assert position['deposit'] == amount
-    assert position['token'] == base_asset.address
+    assert to_checksum_address(position['token']) == base_asset.address
     assert base_asset.balances(pool) == start_balance
     assert base_asset.balances(mock_line) == amount
 
@@ -85,9 +87,9 @@ def test_pool_can_increase_deposit_to_line(
     id = _add_credit(amount, new_deposit=False)
     position = _get_position(mock_line, id)
 
-    assert position['lender'] == pool.address
+    assert to_checksum_address(position['lender']) == pool.address
     assert position['deposit'] == amount
-    assert position['token'] == base_asset.address
+    assert to_checksum_address(position['token']) == base_asset.address
     assert base_asset.balances(pool) == start_balance + amount
     assert base_asset.balances(mock_line) == amount
 
@@ -95,9 +97,9 @@ def test_pool_can_increase_deposit_to_line(
 
     position2 = _get_position(mock_line, id)
 
-    assert position2['lender'] == pool.address
+    assert to_checksum_address(position2['lender']) == pool.address
     assert position2['deposit'] == amount * 2
-    assert position2['token'] == base_asset.address
+    assert to_checksum_address(position2['token']) == base_asset.address
     assert base_asset.balances(pool) == start_balance
     assert base_asset.balances(mock_line) == amount * 2
 
@@ -116,8 +118,8 @@ def test_pool_can_change_rates_on_existing_position(
     position = _get_position(mock_line, id)
 
     # ensure proper position for id
-    assert position['lender'] == pool.address
-    assert position['token'] == base_asset.address
+    assert to_checksum_address(position['lender']) == pool.address
+    assert to_checksum_address(position['token']) == base_asset.address
     
     [drate, frate, _] = mock_line.rates(id)
     assert drate == 0 and frate == 0
@@ -167,7 +169,7 @@ def test_collecting_interest_to_pool_increases_total_assets_and_locked_profit(
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
-    _repay(id, 1)
+    _repay(mock_line, id, 1)
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == 1
@@ -202,14 +204,14 @@ def test_stacks_collected_profits(
     assert p2['interestRepaid'] == 0
 
     ## test adding profit oon top each other
-    _repay(id, expected_interest - 100)
+    _repay(mock_line, id, expected_interest - 100)
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == expected_interest - 100
     assert pool.totalAssets() == INIT_POOL_BALANCE + amount + expected_interest - 100
     assert pool.locked_profits() == expected_interest - 100 # no matter the vesting_rate MUST have 100% at block of collection
     
-    _repay(id, 100)
+    _repay(mock_line, id, 100)
 
     collected =  pool.collect_interest(mock_line, id)
     assert collected == 100
@@ -244,7 +246,7 @@ def test_reduce_credit_cant_pull_more_funds_than_in_position(
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
-    _repay(id, expected_interest)
+    _repay(mock_line, id, expected_interest)
     
     print(f"pool assets/deployed/withdrawn {pool.totalAssets()}  -- {pool.total_deployed()} -- {withdrawn}")
 
@@ -278,7 +280,7 @@ def test_reduce_credit_increases_total_assets_and_locked_profit_and_decreases_to
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
-    _repay(id, expected_interest)
+    _repay(mock_line, id, expected_interest)
 
     # cap interest to withdrawn
     if withdrawn < expected_interest:
@@ -325,7 +327,7 @@ def test_anyone_can_call_collect_interest(
     assert p2['interestRepaid'] == 0
     assert p2['interestAccrued'] == expected_interest
 
-    _repay(id, expected_interest)
+    _repay(mock_line, id, expected_interest)
     
     p3 = _get_position(mock_line, id)
     assert p3['interestRepaid'] == expected_interest
@@ -347,14 +349,14 @@ def test_only_owner_can_reduce_credit(
     pool, mock_line, admin, me, base_asset,
     _add_credit, _get_position, _repay,
 ):
-    id = _add_credit(100, 0, 0)
+    id = _add_credit(100, 0, 0, line=mock_line)
 
     with boa.reverts():
         pool.reduce_credit(mock_line, id, 10_000, sender=me)
     with boa.reverts():
         pool.reduce_credit(mock_line, id, 0, sender=me) # should still revert if no state change
 
-    pool.reduce_credit(mock_line, id, 0, sender=admin)
+    pool.reduce_credit(mock_line, id, 100, sender=admin)
 
 
 @pytest.mark.pool
@@ -388,7 +390,7 @@ def test_reduce_credit_with_max_uint_pulls_all_funds(
     assert p3['interestRepaid'] == 0
     assert p3['interestAccrued'] == expected_interest
 
-    _repay(id, expected_interest)
+    _repay(mock_line, id, expected_interest)
     
     p4 = _get_position(mock_line, id)
     assert p4['interestRepaid'] == expected_interest
@@ -430,7 +432,7 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
     assert p2['interestAccrued'] == expected_interest
     assert p2['interestRepaid'] == 0
 
-    _repay(id, expected_interest)
+    _repay(mock_line, id, expected_interest)
 
     if withdrawn > deposited + expected_interest: # cant withdraw more than is in line
         with boa.reverts(): # TODO test custom revert
@@ -443,7 +445,7 @@ def test_reduce_credit_increases_total_assets_plus_locked_profit_and_reduces_tot
         new_pool_assets = pool.totalAssets()
         assert withdrawn_deposit == withdrawn - expected_interest
         assert withdraw_interest == expected_interest
-        assert pool.total_deployed() == new_pool_balance - withdrawn + expected_interest
+        assert pool.total_deployed() == new_pool_balance + expected_interest - withdrawn
         assert new_pool_assets == new_pool_balance + expected_interest
         assert pool.locked_profits() == expected_interest # no matter the vesting_rate MUST have 100% at block of collection
         
@@ -503,6 +505,354 @@ def test_pool_can_open_multiple_lending_positions(
     assert pool.total_deployed() == INIT_USER_POOL_BALANCE * 2
 
 
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_impair_only_insolvent_lines(pool, base_asset, mock_line, _get_position, _add_credit):
+    id = _add_credit(100)
+    mock_line.borrow(id, 100)
+
+    with boa.reverts(): # TODO TEST custom errors
+        pool.impair(mock_line, id)
+
+    mock_line.declareInsolvent()
+    pool.impair(mock_line, id)
+
+    
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_impair_only_callable_once(pool, base_asset, admin, mock_line, _get_position, _add_credit, _repay):
+    id = _add_credit(100)
+    mock_line.borrow(id, 100)
+
+    with boa.reverts(): # TODO TEST custom errors
+        pool.impair(mock_line, id)
+
+    mock_line.declareInsolvent()
+    pool.impair(mock_line, id)
+
+    with boa.reverts(): # TODO TEST custom errors
+        # self.impairments[line] will be > 0 so assert fails
+        pool.impair(mock_line, id)
+    
+    # cant call impair() again even to recoup funds
+    p = _get_position(mock_line, id)
+    print(f"p pre pay {p}")
+    _repay(mock_line, id, 100)
+    p2 = _get_position(mock_line, id)
+    print(f"p pre pay {p2}")
+    with boa.reverts(): # TODO TEST custom errors
+        # self.impairments[line] will be > 0 so assert fails
+        pool.impair(mock_line, id)
+    
+    principal, interest = pool.reduce_credit(mock_line, id, MAX_UINT, sender=admin)
+    assert principal == 100
+    assert interest == 0
+
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_impair_callable_by_anyone(pool, base_asset, mock_line, admin, me, _add_credit, _increase_credit, _get_position):
+    def run_test(caller):
+        id = _add_credit(INIT_POOL_BALANCE)
+        assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE
+        mock_line.borrow(id, 100)
+        mock_line.declareInsolvent()
+
+        pool.impair(mock_line, id, sender=caller)
+        assert pool.impairments(mock_line) == 100
+        assert pool.total_deployed() == 100
+        assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE + INIT_POOL_BALANCE - 100
+
+        pool.eval(f"self.impairments[{mock_line.address}] = 0")
+        mock_line.reset_position(id)
+
+    run_test(me)
+    run_test(admin)
+    run_test(boa.env.generate_address())
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_impair_with_no_loss_reverts(pool, base_asset, mock_line, admin, me, _get_position, _add_credit):
+    id = _add_credit(INIT_POOL_BALANCE)
+    
+    position =_get_position(mock_line, id)
+    assert position['deposit'] == INIT_POOL_BALANCE
+    assert position['principal'] == 0
+    assert position['interestRepaid'] == 0
+    assert position['interestAccrued'] == 0
+
+    mock_line.declareInsolvent()
+    with boa.reverts(): # TODO TEST custom errors
+        pool.impair(mock_line, id, sender=me)
+
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_reduce_credit_on_insolvent_line_with_interest(
+    pool, mock_line, base_asset, admin, me,
+    _get_position, _repay, _collect_interest, _increase_credit
+):
+    interest, id = _collect_interest(INIT_POOL_BALANCE, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+    profit_logs = pool.get_logs()
+    perf_rev_event = _find_event_by({ 'fee_type': 1 }, profit_logs)
+    collect_rev_event = _find_event_by({ 'fee_type': 16 }, profit_logs)
+    assert pool.accrued_fees() == perf_rev_event['revenue']
+    assert base_asset.balanceOf(pool) == interest
+    
+    mock_line.declareInsolvent()
+    with boa.reverts():
+        # impair fails bc no principal on the position
+        pool.impair(mock_line, id, sender=me)
+    
+    boa.env.time_travel(INTEREST_TIMESPAN_SEC)
+    mock_line.accrueInterest(id)
+    interest2 = _get_position(mock_line, id)['interestAccrued']
+    _repay(mock_line, id, interest2)
+
+    pool.reduce_credit(mock_line, id, MAX_UINT, sender=admin)
+    new_events = pool.get_logs()
+    print("------------------")
+    print(f"newevents {new_events}")
+    new_perf_rev_event = _find_event_by({ 'fee_type': 1 }, new_events)
+    new_collect_rev_event = _find_event_by({ 'fee_type': 16 }, new_events)
+    new_total_deposits = interest + interest2 + INIT_POOL_BALANCE
+    new_rev = (_to_shares(interest2) * pool.eval('self.fees.performance')) / FEE_COEFFICIENT
+    total_fees = perf_rev_event['revenue'] + new_rev
+    assert base_asset.balanceOf(pool) == new_total_deposits
+
+    assert to_checksum_address(new_perf_rev_event['payer']) == pool.address
+    assert new_perf_rev_event['receiver'] == admin
+    assert to_checksum_address(new_perf_rev_event['token']) == pool.address
+    assert new_perf_rev_event['amount'] < interest2 # less bc minflation reduces share price
+    assert new_perf_rev_event['revenue'] == new_rev
+    
+    assert to_checksum_address(new_collect_rev_event['payer']) == pool.address
+    assert new_collect_rev_event['receiver'] == me
+    assert to_checksum_address(new_collect_rev_event['token']) == base_asset.address
+    assert new_collect_rev_event['amount'] == interest
+    assert new_collect_rev_event['revenue'] == 0
+    
+    assert pool.impairments(mock_line) == 0
+    assert pool.accrued_fees() == perf_rev_event['revenue'] + new_perf_rev_event['revenue']
+    assert pool.locked_profit() == interest
+    assert pool.total_assets() == new_total_deposits + interest + interest2 - collect_rev_event['revenue']
+    assert pool.total_supply() == new_total_deposits + total_fees
+    assert pool.total_deployed() == 0
+    
+    # TODO TEST interesting that price goes down immediately after collecting profit bc
+    # profit is locked but we pay immediately to caller
+    assert pool.vault_assets() == new_total_deposits - collect_rev_event['revenue']
+    
+    position = _get_position(mock_line, id)
+    assert position['deposit'] == 0
+    assert position['principal'] == 0
+    assert position['interestRepaid'] == 0
+    assert position['interestAccrued'] == 0
+
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+@given(borrowed=st.integers(min_value=1, max_value=10**25),
+       perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_impair_with_loss_plus_interest(
+    pool, mock_line, admin, me, base_asset,
+    borrowed, perf_fee,
+    _get_position, _repay, _collect_interest, _increase_credit
+):
+    print(f"------------------------")
+    pool.set_performance_fee(perf_fee, sender=admin)
+    interest, id = _collect_interest(INIT_POOL_BALANCE, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+    # get event before boa wipes on next tx
+    profit_logs = pool.get_logs()
+    # print(f"+ loss + interest events -- {profit_logs}")
+    perf_rev_event = _find_event_by({ 'fee_type': 1 }, profit_logs)
+
+    if perf_rev_event is not None:
+        # interest claimed was higher than debt impaired
+        # perf + collector rev generated 
+        assert to_checksum_address(perf_rev_event['payer']) == pool.address
+        assert perf_rev_event['receiver'] == admin
+        assert to_checksum_address(perf_rev_event['token']) == pool.address
+        # maybe use updated pool price instead of stale one
+        # or `if lost > interest >= shares else <= shares`` bc minflation affects price
+        if borrowed > interest:
+            assert perf_rev_event['amount'] >= interest # more shares bc minflation reduces price
+        else:
+            assert perf_rev_event['amount'] <= interest # more shares bc minflation reduces price
+
+        # if rounding error, do diff in accrued_fees btw interest
+        # subtract principal repaid from interest
+        # NOTE: pool converst to assets to shares  before calculating fees
+        assert perf_rev_event['revenue'] == math.floor((_to_shares(interest, pool.price()) * perf_fee) / FEE_COEFFICIENT)
+        
+
+    mock_line.borrow(id, borrowed)
+    mock_line.declareInsolvent()
+    print(f"Profit Event {perf_rev_event}")
+    
+     # accrue interest again on call to test proper fees math on burn + rev reporting
+    boa.env.time_travel(INTEREST_TIMESPAN_SEC)
+    mock_line.accrueInterest(id)
+    position = _get_position(mock_line, id)
+    print(f"position w/ in {position}")
+    interest_earned = _get_position(mock_line, id)['interestAccrued']
+    _repay(mock_line, id, interest_earned)
+    share_price = pool.price() # store pool price before impairing
+    pool.impair(mock_line, id, sender=me)
+    impair_logs = pool.get_logs()
+    print(f"+ loss + interest events -- {impair_logs}")
+
+    print(
+        "impair helper events",
+        _find_event_by({ 'str': "fees_shares_burn" }, impair_logs),
+        _find_event_by({ 'str': "fee_assets_burned" }, impair_logs),
+        _find_event_by({ 'str': "total_to_burn" }, impair_logs),
+        _find_event_by({ 'str': "pool_assets_lost" }, impair_logs),
+    )
+
+    impair_event = _find_event('Impair', impair_logs).args_map
+    perf_rev_event = _find_event_by({ 'fee_type': 1 }, profit_logs)
+
+    # cant earn fees on impaired lines even if position was fully profitable
+    assert perf_rev_event is None
+
+    print(f"Impair Event + loss + interest {impair_event}")
+
+    assert impair_event['position'] == id
+    assert to_checksum_address(impair_event['line']) == mock_line.address
+    assert impair_event['realized_loss'] == borrowed
+    assert impair_event['interest_earned'] == interest
+    assert impair_event['recovered_deposit'] == INIT_POOL_BALANCE - borrowed
+    assert impair_event['fees_burned'] == perf_rev_event['revenue']
+    if interest > borrowed:
+        assert impair_event['net_asset_loss'] == borrowed
+    else:
+        # loss reduced by burning previously earned fees and interest we just collected
+        assert impair_event['net_asset_loss'] == borrowed - interest_earned - _to_assets(perf_rev_event['revenue'])
+
+    new_total_deposits = INIT_POOL_BALANCE + INIT_POOL_BALANCE
+    new_total_assets = new_total_deposits - borrowed + interest + interest_earned
+    assert base_asset.balanceOf(pool) == new_total_assets
+
+    assert pool.impairments(mock_line) == borrowed
+    assert pool.accrued_fees() == perf_rev_event['revenue']
+    assert pool.locked_profits() == interest
+    assert pool.total_assets() == new_total_assets
+    assert pool.total_supply() == new_total_deposits
+    assert pool.total_deployed() == borrowed
+
+    # profit is locked but we pay immediately to caller
+    assert pool.vault_assets() == INIT_POOL_BALANCE
+
+    # technically this tests line not pool but whatevs integration test
+    position = _get_position(mock_line, id)
+    assert position['deposit'] == INIT_POOL_BALANCE - borrowed
+    assert position['principal'] == borrowed
+    assert position['interestRepaid'] == 0
+    assert position['interestAccrued'] == 0
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+@given(deposited=st.integers(min_value=10**25, max_value=10**34),
+       borrowed=st.integers(min_value=1, max_value=10**25),)
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_impair_with_loss(
+    pool, base_asset, mock_line, admin, me,
+    deposited, borrowed,
+    _add_credit, _get_position
+):
+    assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE # clean start
+    pool.eval('self.accrued_fees = 0')
+    id = _add_credit(deposited)
+    assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE # in line
+    mock_line.borrow(id, borrowed)
+    mock_line.declareInsolvent()
+    pool.impair(mock_line, id, sender=me)
+    impair_logs = pool.get_logs()
+    impair_event = _find_event('Impair', impair_logs).args_map
+    new_total_assets = deposited - borrowed
+
+    assert impair_event['position'] == id
+    assert to_checksum_address(impair_event['line']) == mock_line.address
+    assert impair_event['net_asset_loss'] == borrowed
+    assert impair_event['realized_loss'] == borrowed
+    assert impair_event['interest_earned'] == 0
+    assert impair_event['recovered_deposit'] == new_total_assets
+    assert impair_event['fees_burned'] == 0
+
+
+    assert base_asset.balanceOf(pool) == new_total_assets
+    assert pool.impairments(mock_line) == borrowed
+    assert pool.accrued_fees() == 0
+    assert pool.locked_profits() == 0
+    assert pool.total_assets() == new_total_assets
+    assert pool.total_supply() == deposited
+    assert pool.total_deployed() == borrowed
+    assert pool.price() == _calc_price(new_total_assets, deposited)
+
+    # profit is locked but we pay immediately to caller
+    assert pool.vault_assets() == INIT_POOL_BALANCE + deposited
+
+    
+    position = _get_position(mock_line, id)
+    assert position['deposit'] == borrowed
+    assert position['principal'] == borrowed
+    assert position['interestRepaid'] == 0
+    assert position['interestAccrued'] == 0
+
+
+@pytest.mark.pool
+@pytest.mark.loss
+@pytest.mark.line_integration
+def test_impair_all_pool_assets(
+    pool, base_asset, mock_line, admin, me,
+    _add_credit, _get_position
+):
+    id = _add_credit(INIT_POOL_BALANCE)
+    mock_line.borrow(id, INIT_POOL_BALANCE)
+    # no interest earned so we can lose impair principal amount
+    mock_line.declareInsolvent()
+    pool.impair(mock_line, id, sender=me)
+    impair_logs = pool.get_logs()
+    impair_event = _find_event('Impair', impair_logs).args_map
+    perf_rev_event = _find_event_by({'fee_type': 1}, impair_logs)
+
+
+    assert impair_event['position'] == id
+    assert to_checksum_address(impair_event['line']) == mock_line.address
+    assert impair_event['net_asset_loss'] == INIT_POOL_BALANCE
+    assert impair_event['realized_loss'] == INIT_POOL_BALANCE
+    assert impair_event['interest_earned'] == 0
+    assert impair_event['recovered_deposit'] == 0
+    assert impair_event['fees_burned'] == 0
+
+    assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE
+
+    assert pool.impairments(mock_line) == INIT_POOL_BALANCE
+    assert pool.accrued_fees() == 0
+    assert pool.locked_profits() == 0
+    assert pool.total_assets() == 0
+    assert pool.total_supply() == INIT_POOL_BALANCE
+    assert pool.total_deployed() == INIT_POOL_BALANCE
+    assert pool.price() == POOL_PRICE_DECIMALS
+
+    # profit is locked but we pay immediately to caller
+    assert pool.vault_assets() == 0
+
+    position = _get_position(mock_line, id)
+    assert position['deposit'] == INIT_POOL_BALANCE
+    assert position['principal'] == INIT_POOL_BALANCE
+    assert position['interestRepaid'] == 0
+    assert position['interestAccrued'] == 0
+
 ### Pool Lender Tests
 
 # (done) only owner can call add_credit
@@ -519,10 +869,25 @@ def test_pool_can_open_multiple_lending_positions(
 # (done) reduce_credit cant pull more funds than in position
 # (done) reduce_credit with interest increases total assets and locked profit and decreases total deployed
 
+
+# (done) can only impair if line is insolvent
+# (done) anyone can impair incl owner
+# (done) cant impair with no principal loss 
+# cannot impair the same position id twice (error on line not pool)
+# reduce impaired amount when we receive principal repayment after
+# (done) collect_interest then impair burns fees 
+# (done) impair (+ claim interest)
+# (done) impair w/ accrued_fees
+# (done) impair no accrued_fees
+# (done) impairing all assets (total_deployed) brings share price to 0
+# - test multi invest + divest - 
+# properly divest -  no profit, profit, loss, profit, no profit, profit, loss (to 0 then invest again), profit
+# properly impair - loss, profit (2x),
+
+
 # major internal funcs
 # (done via collect_interest) _reduce_credit with 0 will only withdraw available interest (test withdrawable, 
 # (done) _reduce_credit with MAX_UINT will withdraw all available funds
-
 
 
 ### Pool Borrower Tests

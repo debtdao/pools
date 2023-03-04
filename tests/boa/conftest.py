@@ -14,6 +14,7 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
 INIT_POOL_BALANCE =  10**25  # 1M @ 18 decimals
 INIT_USER_POOL_BALANCE = 5*10**24
+POOL_PRICE_DECIMALS=1e18
 
 # dummy addresses. not active signers like Ape.accounts
 @pytest.fixture(scope="module")
@@ -41,7 +42,6 @@ def base_asset(admin):
 @pytest.fixture(scope="module")
 def pool(admin, base_asset):
     with boa.env.prank(admin): # necessary?
-        print(ape.types)
         return boa.load('contracts/DebtDAOPool.vy', admin, base_asset, "Dev Testing", "KIBA-TEST", [ 0, 0, 0, 0, 0, 0 ])
 
 @pytest.fixture(scope="module")

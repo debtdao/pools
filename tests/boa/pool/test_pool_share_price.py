@@ -7,7 +7,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from datetime import timedelta
 from math import exp
-from ..conftest import MAX_UINT, INIT_USER_POOL_BALANCE
+from ..conftest import POOL_PRICE_DECIMALS, MAX_UINT, INIT_USER_POOL_BALANCE
 from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO
 
 
@@ -57,20 +57,20 @@ from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO
 @pytest.mark.pool
 @pytest.mark.share_price
 def test_pool_price_always_starts_1_to_1(pool):
-    assert pool.price() == 1
+    assert pool.price() == POOL_PRICE_DECIMALS
 
 @pytest.mark.pool
 @pytest.mark.share_price
 @given(amount=st.integers(min_value=10**18, max_value=MAX_UINT),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_pool_price_doesnt_change_on_deposit_withdraw_with_no_fees(pool, me, amount, _deposit):
-    assert pool.price() == 1
+    assert pool.price() == POOL_PRICE_DECIMALS
     pool.eval(SET_FEES_TO_ZERO)
     assert pool.fees() == (0,0,0,0,0,0)
     _deposit(amount, me)
-    assert pool.price() == 1
+    assert pool.price() == POOL_PRICE_DECIMALS
     pool.withdraw(amount, me, me, sender=me)
-    assert pool.price() == 1
+    assert pool.price() == POOL_PRICE_DECIMALS
 
 @pytest.mark.pool
 @pytest.mark.share_price
