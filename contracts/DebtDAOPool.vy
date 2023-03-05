@@ -631,7 +631,7 @@ def set_vesting_rate(_vesting_rate: uint256):
 	# Since "_vesting_rate" is of type uint256 it can never be less than zero
 	assert _vesting_rate <= VESTING_RATE_COEFFICIENT
 	self.vesting_rate = _vesting_rate
-	log UpdateProfitDegredation(_vesting_rate) 
+	log UpdateProfitVestingRate(_vesting_rate) 
 
 ### ERC4626 Functions
 @external
@@ -1753,14 +1753,6 @@ interface IERC4626R:
 	def depositWithReferral(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
 	def mintWithReferral(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
 
-# 4626 extension for permits
-interface IERC4626P:
-	def depositWithPermit(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
-	def mintWithPermit(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
-	def depositWithPermit2(assets: uint256, receiver: address, referrer: address)  -> uint256: nonpayable
-	def mintWithPermit2(shares: uint256, receiver: address, referrer: address) -> uint256: nonpayable
-
-
 # Flashloans
 interface IERC3156:
 	# /**
@@ -1966,7 +1958,7 @@ event Sweep:
 	token: indexed(address) # New active deposit limit
 	amount: uint256 # New active deposit limit
 
-event UpdateProfitDegredation:
+event UpdateProfitVestingRate:
 	degredation: uint256
 
 
