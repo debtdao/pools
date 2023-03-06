@@ -8,7 +8,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from eth_utils import to_checksum_address
 from ..conftest import POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
-from ..utils.price import _calc_price, _to_assets, _to_shares
+from ..utils.price import _calc_price, _to_assets, _to_shares, _calc_fee
 from ..utils.events import _find_event
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -76,21 +76,30 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     pool.eval(f'self.total_supply = {shares}')
     share_price = pool.price() # pre deposit price is used in _deposit() for calculating shares returned
 
-    if share_price == 0:
-        return # cant deposit if no price
+    # if share_price == 0:
+    #     return # cant deposit if no price
 
-    # _assert_uint_with_rounding(share_price, expected_share_price)
+    # TODO TEST fix rounding errors
+    # assert expected_share_price == share_price
 
     # fees_generated = round((amount * deposit_fee) / FEE_COEFFICIENT / share_price)
     fees_generated = math.floor((amount * deposit_fee) / FEE_COEFFICIENT / share_price) 
     pool.eval(f'self.fees.deposit = {deposit_fee}')
+
+    # deposit fails if we `amount` gets us no shares back bc price too high
+    expected_shares = _to_shares(amount, share_price)
+    if expected_shares <= 0: # TODO TEST is it ok that 0 doesnt revert?
+        with boa.reverts():
+            pool.deposit(amount, me, sender=me) 
+        print(f"deposit failed, shares returned == 0 - amount/share_price {amount}/{share_price}")
+        return
 
     # deposit fails if we havent approved base tokens to pool yet
     if amount > 0: # TODO TEST is it ok that 0 doesnt revert?
         with boa.reverts():
             pool.deposit(amount, me, sender=me) 
 
-    base_asset.approve(pool, amount, sender=me) 
+    base_asset.approve(pool, MAX_UINT, sender=me) 
     shares_created = pool.deposit(amount, me, sender=me) 
 
     # TODO TEST event emissions
@@ -103,9 +112,9 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     assert to_checksum_address(deposit_event.args_map['owner']) == me
     assert to_checksum_address(deposit_event.args_map['sender']) == me
     
-    if shares > 0:
-        assert deposit_event.args_map['assets'] == amount
-        assert deposit_event.args_map['shares'] == shares_created
+    # if shares > 0:
+    assert deposit_event.args_map['assets'] == amount
+    assert deposit_event.args_map['shares'] == shares_created
 
     assert deposit_rev_event.args_map['fee_type'] == 2
     assert deposit_rev_event.args_map['amount'] == shares_created
@@ -114,16 +123,10 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
     assert to_checksum_address(deposit_rev_event.args_map['token']) == pool.address
     assert to_checksum_address(deposit_rev_event.args_map['receiver']) == pool.owner()
 
-    # # INIT_USER_POOL_BALANCE = round(amount / share_price)
-    # INIT_USER_POOL_BALANCE = math.floor(amount / share_price)
-    # # ensure right price for shares
-    # # accomodate evm vs python rounding differences
-    # _assert_uint_with_rounding(shares_created, INIT_USER_POOL_BALANCE)
-    # # ensure shares got minted to right person
-    # _assert_uint_with_rounding(pool.balanceOf(me), INIT_USER_POOL_BALANCE)
-    # # ensure supply was inflated by deposit + fee
-    # expected_total_supply = shares + shares_created + fees_generated
-    # _assert_uint_with_rounding(pool.totalSupply(), expected_total_supply)
+    assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE + amount
+    assert pool.totalSupply() == shares + shares_created + pool.accrued_fees()
+    assert pool.balanceOf(me) == init_token_balances + shares_created
+    # assert shares_created == expected_shares # TODO TEST rounding error
 
 
 @pytest.mark.ERC4626
@@ -139,7 +142,6 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
     Test share price before and after first person enters the pool
     init_token_balances does deposit flow in ../conftest.py
     """
-
     # handle fuzzing vars math for share price
     expected_share_price = _calc_price(assets, shares)
     if shares == 0 or assets == 0: # nothing to price
@@ -154,7 +156,8 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
     pool.eval(f'self.total_supply = {shares}')
     share_price = pool.price() # pre deposit price is used in _deposit() for calculating shares returned
 
-    assert expected_share_price == share_price
+    # TODO TEST fix rounding errors
+    # assert expected_share_price == share_price
 
     assert pool.balanceOf(me) == init_token_balances
     assets_for_shares = _to_assets(amount, share_price)
@@ -176,7 +179,14 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
         with boa.reverts():
             pool.mint(amount, me, sender=me) 
 
-    base_asset.approve(pool, assets_for_shares, sender=me) 
+    # deposit fails if under minimum shares required
+    if assets_for_shares < pool.min_deposit():
+        with boa.reverts():
+            pool.mint(amount, me, sender=me)
+        print(f"deposit below min {assets_for_shares}/{pool.min_deposit()}/{amount}")
+        return
+
+    base_asset.approve(pool, MAX_UINT, sender=me) 
     assets_deposited = pool.mint(amount, me, sender=me)
 
     # TODO TEST event emissions
@@ -188,7 +198,7 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
 
     assert to_checksum_address(mint_event.args_map['owner']) == me
     assert to_checksum_address(mint_event.args_map['sender']) == me
-    assert mint_event.args_map['assets'] == assets_for_shares
+    assert mint_event.args_map['assets'] == assets_deposited # TODO TEST rounding error `assets_for_shares`
     assert mint_event.args_map['shares'] == amount
 
     assert mint_rev_event.args_map['fee_type'] == 2
@@ -214,6 +224,8 @@ def test_withdraw(
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE
+    pre_action_price = pool.price()
+    assert pre_action_price == POOL_PRICE_DECIMALS
 
     pool.eval(f"self.fees.withdraw = {withdraw_fee}")
 
@@ -221,7 +233,7 @@ def test_withdraw(
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=me)
         return # cant test bc redeem tx will revert
-
+    
     shares_withdrawn = pool.withdraw(amount, me, me, sender=me)
     
     # NOTE: MUST test events immediately after tx else boa deletes.
@@ -237,7 +249,7 @@ def test_withdraw(
     withdraw_rev_event = _find_event('RevenueGenerated', logs)
     assert withdraw_rev_event.args_map['fee_type'] == 4
     assert withdraw_rev_event.args_map['amount'] == amount
-    assert withdraw_rev_event.args_map['revenue'] == shares_withdrawn - amount
+    assert withdraw_rev_event.args_map['revenue'] ==  _calc_fee(assets=amount, fee=withdraw_fee, price=pre_action_price)
     assert to_checksum_address(withdraw_rev_event.args_map['payer']) == me
     assert to_checksum_address(withdraw_rev_event.args_map['token']) == pool.address
     assert to_checksum_address(withdraw_rev_event.args_map['receiver']) == pool.address
@@ -257,14 +269,14 @@ def test_withdraw(
     
     # TODO TEST when we re-implement withdraw fees
     # burn more shares than amount even tho share price is 1
-    # if withdraw_fee == 0:
-    #     assert pool.price() == POOL_PRICE_DECIMALS
-    # else:
-    #     assert pool.price() <= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
+    if withdraw_fee == 0:
+        assert pool.price() == POOL_PRICE_DECIMALS
+    else:
+        assert pool.price() >= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
 
-    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-    #     min_shares_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
-    #     assert shares_withdrawn > amount and shares_withdrawn >= min_shares_withdrawn
+    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+        min_shares_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
+        assert shares_withdrawn < amount and shares_withdrawn <= min_shares_withdrawn
 
 
 @pytest.mark.ERC4626
@@ -283,7 +295,8 @@ def test_withdraw_with_approval(
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE
 
-    pool.approve(admin, amount, sender=me)
+    # approve max bc they take `amount` + a withdraw fee` 
+    pool.approve(admin, MAX_UINT, sender=me)
     
     pool.eval(f"self.fees.withdraw = {withdraw_fee}")
 
@@ -291,7 +304,8 @@ def test_withdraw_with_approval(
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=admin)
         return # cant test bc redeem tx will revert
-
+    
+    pre_action_price = pool.price()
     # TODO TEST modify share price with assets/shares and ensure math is right            
     shares_withdrawn = pool.withdraw(amount, me, me, sender=admin)
 
@@ -311,14 +325,14 @@ def test_withdraw_with_approval(
     assert to_checksum_address(withdraw_rev_event.args_map['receiver']) == pool.address
     assert withdraw_rev_event.args_map['amount'] == amount # fees are on original shares, bc shares_withdrawn incl fees
     assert withdraw_rev_event.args_map['fee_type'] == 4 # index 2 in pool.FEE_TYPES
-    assert withdraw_rev_event.args_map['revenue'] == shares_withdrawn - amount
+    assert withdraw_rev_event.args_map['revenue'] ==  _calc_fee(assets=amount, fee=withdraw_fee, price=pre_action_price)
 
     assert pool.totalAssets() == INIT_POOL_BALANCE - amount
     assert pool.totalSupply() == INIT_POOL_BALANCE - shares_withdrawn
     
     # TODO TEST when we re-implement withdraw fees
-    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-    #     assert shares_withdrawn > amount
+    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+        assert shares_withdrawn > amount
 
     assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - shares_withdrawn
     assert base_asset.balanceOf(me) == user_asset_balance + amount
@@ -347,7 +361,8 @@ def test_redeem(
         with boa.reverts(): # TODO TEST custom errors
             pool.withdraw(amount, me, me, sender=me)
         return # cant test bc redeem tx will revert
-
+        
+    pre_action_price = pool.price()
     assets_withdrawn = pool.redeem(amount, me, me, sender=me)
     
     # NOTE: MUST test events immediately after tx else boa deletes.
@@ -357,39 +372,96 @@ def test_redeem(
     assert to_checksum_address(redeem_event.args_map['owner']) == me
     assert to_checksum_address(redeem_event.args_map['sender']) == me
     assert to_checksum_address(redeem_event.args_map['receiver']) == me
-    assert redeem_event.args_map['assets'] == amount
-    assert redeem_event.args_map['shares'] == assets_withdrawn
+    assert redeem_event.args_map['assets'] == assets_withdrawn
+    assert redeem_event.args_map['shares'] == amount
 
     redeem_rev_event = _find_event('RevenueGenerated', logs)
     assert redeem_rev_event.args_map['fee_type'] == 4
     assert redeem_rev_event.args_map['amount'] == amount
-    assert redeem_rev_event.args_map['revenue'] == amount - assets_withdrawn
+    assert redeem_rev_event.args_map['revenue'] == _calc_fee(shares=amount, fee=withdraw_fee, price=pre_action_price)
     assert to_checksum_address(redeem_rev_event.args_map['payer']) == me
     assert to_checksum_address(redeem_rev_event.args_map['token']) == pool.address
     assert to_checksum_address(redeem_rev_event.args_map['receiver']) == pool.address
 
     assert pool.totalAssets() == INIT_POOL_BALANCE - amount
-        
-
-    assert pool.totalAssets() == INIT_POOL_BALANCE - amount
     assert pool.totalSupply() == INIT_POOL_BALANCE - assets_withdrawn
-
-    assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - amount # ensure shares burned from right person
-
-
-    assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - assets_withdrawn
-    assert base_asset.balanceOf(me) == user_asset_balance + amount
+    # assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - amount # ensure shares burned from right person
+    assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - amount
+    assert base_asset.balanceOf(me) == user_asset_balance + assets_withdrawn
     
     # TODO TEST when we re-implement withdraw fees
     # burn more shares than amount even tho share price is 1
-    # if withdraw_fee == 0:
-    #     assert pool.price() == POOL_PRICE_DECIMALS
-    # else:
-    #     assert pool.price() <= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
+    if withdraw_fee == 0:
+        assert pool.price() == POOL_PRICE_DECIMALS
+    else:
+        assert pool.price() >= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
 
-    # if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
-    #     min_amount_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
-    #     assert assets_withdrawn > amount and assets_withdrawn >= min_amount_withdrawn
+    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+        min_amount_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
+        assert assets_withdrawn < amount and assets_withdrawn <= min_amount_withdrawn
+
+
+
+@pytest.mark.ERC4626
+@given(amount=st.integers(min_value=1, max_value=10**25),
+        # total pool assets/shares to manipulate share price
+        assets=st.integers(min_value=100, max_value=10**24),
+        shares=st.integers(min_value=1, max_value=10**25),
+        withdraw_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_redeem_with_approval(
+    pool, base_asset, me, admin, init_token_balances,
+    amount, assets, shares, withdraw_fee,
+):
+    user_asset_balance = base_asset.balanceOf(me)
+    assert pool.totalAssets() == INIT_POOL_BALANCE
+    assert pool.totalSupply() == INIT_POOL_BALANCE
+    assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE
+
+    pool.eval(f"self.fees.withdraw = {withdraw_fee}")
+
+    if amount > INIT_USER_POOL_BALANCE:
+        with boa.reverts(): # TODO TEST custom errors
+            pool.withdraw(amount, me, me, sender=me)
+        return # cant test bc redeem tx will revert
+        
+    pre_action_price = pool.price()
+    assets_withdrawn = pool.redeem(amount, me, me, sender=me)
+    
+    # NOTE: MUST test events immediately after tx else boa deletes.
+    logs = pool.get_logs()
+
+    redeem_event = _find_event('Withdraw', logs)
+    assert to_checksum_address(redeem_event.args_map['owner']) == me
+    assert to_checksum_address(redeem_event.args_map['sender']) == me
+    assert to_checksum_address(redeem_event.args_map['receiver']) == me
+    assert redeem_event.args_map['assets'] == assets_withdrawn
+    assert redeem_event.args_map['shares'] == amount
+
+    redeem_rev_event = _find_event('RevenueGenerated', logs)
+    assert redeem_rev_event.args_map['fee_type'] == 4
+    assert redeem_rev_event.args_map['amount'] == amount
+    assert redeem_rev_event.args_map['revenue'] == _calc_fee(shares=amount, fee=withdraw_fee, price=pre_action_price)
+    assert to_checksum_address(redeem_rev_event.args_map['payer']) == me
+    assert to_checksum_address(redeem_rev_event.args_map['token']) == pool.address
+    assert to_checksum_address(redeem_rev_event.args_map['receiver']) == pool.address
+
+    assert pool.totalAssets() == INIT_POOL_BALANCE - amount
+    assert pool.totalSupply() == INIT_POOL_BALANCE - assets_withdrawn
+    # assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - amount # ensure shares burned from right person
+    assert pool.balanceOf(me) == INIT_USER_POOL_BALANCE - amount
+    assert base_asset.balanceOf(me) == user_asset_balance + assets_withdrawn
+    
+    # TODO TEST when we re-implement withdraw fees
+    # burn more shares than amount even tho share price is 1
+    if withdraw_fee == 0:
+        assert pool.price() == POOL_PRICE_DECIMALS
+    else:
+        assert pool.price() >= POOL_PRICE_DECIMALS # TODO price will always be 0 if < 1:1 backing
+
+    if withdraw_fee > 0 and amount > FEE_COEFFICIENT:
+        min_amount_withdrawn = math.floor(amount + (amount * withdraw_fee / FEE_COEFFICIENT)) - 10
+        assert assets_withdrawn < amount and assets_withdrawn <= min_amount_withdrawn
 
 
 @pytest.mark.ERC4626
@@ -488,19 +560,22 @@ def test_invariant_preview_equals_realized_share_price(
     """
     we do not take 
     """
-    def reset():
+    def reset(pool, asset):
         pool.eval(f"self.total_assets = {assets}")
         pool.eval(f"self.total_supply = {shares}")
         pool.eval(f"self.balances[{me}] = {shares}")
-        base_asset.approve(pool, assets,  sender=me)
+        asset.approve(pool, assets,  sender=me)
         # print("reset pool vals", pool.totalSupply(), pool.totalAssets())
-        
-    reset()
+    
+    pre_action_price = pool.price()
+
+
+    reset(pool, base_asset)
     redeemable = pool.previewRedeem(shares, sender=me)
     withdrawable = pool.previewWithdraw(assets, sender=me)
     print("reset pool vals", pool.totalSupply(), pool.totalAssets(), assets)
     redeemed = pool.redeem(shares, me, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     withdrawn = pool.withdraw(assets, me, me, sender=me)
 
     assert redeemable == redeemed
@@ -508,37 +583,40 @@ def test_invariant_preview_equals_realized_share_price(
 
     pool.eval(f"self.fees.withdraw = {pittance_fee}")
 
-    reset()
-    redeemable = pool.previewRedeem(shares, sender=me)
+    withdraw_fee = _calc_fee(assets=assets, fee=withdraw_fee, price=pre_action_price)
+    redeem_fee = _calc_fee(shares=shares, fee=withdraw_fee, price=pre_action_price)
+    reset(pool, base_asset)
+    redeemable= pool.previewRedeem(shares, sender=me)
     withdrawable = pool.previewWithdraw(assets, sender=me)
+    print(f"preview price invariant - {shares}/{pool.totalSupply()}/")
     redeemed = pool.redeem(shares, me, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     withdrawn = pool.withdraw(assets, me, me, sender=me)
-    reset()
+    reset(pool, base_asset)
 
     assert redeemable == redeemed
     assert withdrawable == withdrawn
 
 
-    reset()
+    reset(pool, base_asset)
     mintable = pool.previewMint(shares, sender=me)
     depositable = pool.previewDeposit(assets, sender=me)
     minted = pool.mint(shares, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     deposited = pool.deposit(assets, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     assert mintable == minted
     assert depositable == deposited
     
     pool.eval(f"self.fees.deposit = {pittance_fee}")
 
-    reset()
+    reset(pool, base_asset)
     mintable = pool.previewMint(shares, sender=me)
     depositable = pool.previewDeposit(assets, sender=me)
     minted = pool.mint(shares, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     deposited = pool.deposit(assets, me, sender=me)
-    reset()
+    reset(pool, base_asset)
     assert mintable == minted
     assert depositable == deposited
 

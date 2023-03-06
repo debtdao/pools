@@ -407,7 +407,7 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 
 	log Impair(_line, _id, recovered, position.interestRepaid, fees_burned, pool_net_loss, position.principal)
 	
-	return (withdrawable, position.principal)
+	return (pool_net_loss, fees_burned)
 
 ### External 4626 vault investing
 
@@ -694,7 +694,7 @@ def withdraw(
 	"""
 	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
-	return self._withdraw(_assets,  self._convert_to_shares(_assets), _owner, _receiver)
+	return self._withdraw(_assets, _owner, _receiver)
 
 @external
 @nonreentrant("lock")
@@ -704,9 +704,7 @@ def redeem(_shares: uint256, _receiver: address, _owner: address) -> uint256:
 	"""
 	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
-	assets: uint256 = self._convert_to_assets(_shares)
-	self._withdraw(assets, _shares, _owner, _receiver)
-	return assets
+	return self._redeem(_shares, _owner, _receiver)
 
 ### ERC20 Functions
 
@@ -841,11 +839,11 @@ def _calc_and_mint_fee(
 	if(fees != 0):
 		if(to == self.owner):
 			# store delegate fees separately from delegate balance so we can slash if neccessary
-			assert self._mint(self, fees)
+			self._mint(self, fees)
 			self.accrued_fees += fees
 		else:
 			# mint other ecosystem participants fees to them directly
-			assert self._mint(to, fees)
+			self._mint(to, fees)
 
 	# log fees even if 0 so we can simulate potential fee structures post-deployment
 	log RevenueGenerated(payer, self, fees, shares, convert(fee_type, uint256), to)
@@ -880,7 +878,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 	amount: uint256 = _amount
 	if _amount == 0:
 		amount = principal # only withdraw initial principal
-	if _amount == max_value(uint256):
+	elif _amount == max_value(uint256):
 		amount = IERC4626(_vault).previewWithdraw(_amount) # get all assets deposited in vvault
 
 	burned_shares: uint256 = IERC4626(_vault).withdraw(amount, self, self)
@@ -999,6 +997,7 @@ def _deposit(
 	@dev 		- priviliged internal func
 	@returns 	- amount of shares received for _assets
 	"""
+	assert _shares > 0 # cant deposit assets without receiving shares back. Also prevents share price attacks
 	assert _assets >= self.min_deposit
 	assert self.total_assets + _assets <= self.max_assets # dev: Pool max reached
 	assert _receiver != empty(address)
@@ -1031,6 +1030,33 @@ def _deposit(
 @internal
 def _withdraw(
 	_assets: uint256,
+	_owner: address,
+	_receiver: address
+) -> uint256:
+	"""
+	@dev - priviliged internal function. Should run price updates before calculating _assets/_shares params
+
+	"""
+	
+	assert _receiver != empty(address)
+	assert _assets <= self._max_liquid_assets() 	# dev: insufficient liquidity
+
+	# mintflation fees adversly affects pool but not withdrawer who should be the one penalized.
+	# make them burn extra _shares instead of inflating total supply.
+	# use _calc not _mint_and_calc + manually log revenue
+	shares: uint256 = self._convert_to_shares(_assets)
+	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
+	# log potential fees for product analytics
+	log RevenueGenerated(_owner, self, withdraw_fee, shares, convert(FEE_TYPES.WITHDRAW, uint256), self)
+
+	#  TODO have _asset/_shares == 0 if withdraw/redeem and then dynamically calc withdraw fee in assets or shares
+	burned_shares: uint256 = shares + withdraw_fee
+	self._burn_and_withdraw(burned_shares, _assets, _owner, _receiver)
+
+	return burned_shares
+
+@internal
+def _redeem(
 	_shares: uint256,
 	_owner: address,
 	_receiver: address
@@ -1039,44 +1065,44 @@ def _withdraw(
 	@dev - priviliged internal function. Should run price updates before calculating _assets/_shares params
 
 	"""
-	assert _assets > 0
-	assert _assets <= self._max_liquid_assets() 	# dev: insufficient liquidity
-	assert _receiver != empty(address)
-	self._assert_caller_has_approval(_owner, _shares)
-	
 
-	# TODO TEST how withdraw fee inflatino affects the _shares/asssets that they are *supposed* to lose
-		
-	# mintflation fees adversly affects pool but not withdrawer who should be the one penalized.
-	# make them burn extra _shares instead of inflating total supply.
-	# use _calc not _mint_and_calc + manually log revenue
-	# withdraw_fee: uint256 = self._calc_fee(_shares, self.fees.withdraw)
-	withdraw_fee: uint256 = 0 
+	withdraw_fee: uint256 = self._calc_fee(_shares, self.fees.withdraw)
 	# log potential fees for product analytics
 	log RevenueGenerated(_owner, self, withdraw_fee, _shares, convert(FEE_TYPES.WITHDRAW, uint256), self)
 
-	#  TODO have _asset/_shares == 0 if withdraw/redeem and then dynamically calc withdraw fee in assets or shares
-	burned_shares: uint256 = _shares + withdraw_fee
-	self.total_assets -= _assets # remove _assets from pool
+	assets_w_fees: uint256 = self._convert_to_assets(_shares) + self._convert_to_shares(withdraw_fee)	
+	self._burn_and_withdraw(_shares, assets_w_fees, _owner, _receiver)
+
+	return assets_w_fees
+
+
+@internal
+def _burn_and_withdraw(_shares: uint256, _assets: uint256, _owner: address, _receiver: address):
+	assert _receiver != empty(address)
+	assert _shares != 0 and _assets != 0
+	# SLOADs last
+	assert _shares <= self.total_supply and _assets <= self._max_liquid_assets()
+
+	self._assert_caller_has_approval(_owner, _shares)
+	# remove _assets from pool
+	self.total_assets -= _assets		
 	# Burn shares instead of giving to owner. Withdrawals = owner bad
-	self._burn(_owner, burned_shares)
+	self._burn(_owner, _shares)
 	self._erc20_safe_transfer(ASSET, _receiver, _assets)
 
-	log Withdraw(burned_shares, _owner, _receiver, msg.sender, _assets)
+	log Withdraw(_shares, _owner, _receiver, msg.sender, _assets)
 	# for testing - log price change after deposit and fee inflation
 	# log TrackSharePrice((_assets * PRICE_DECIMALS) / _shares, self._virtual_price(), self._virtual_apr()) # log price/apr for product analytics
-
-	return burned_shares
-
 
 @internal
 def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256):
 	"""
 	@return diff in pool assets (earned or lost), owner fees burned
 	"""
+	# correct current share price and distributed dividends after eating losses
+	self._unlock_profits()
 	if not _impair:
 		# correct current share price and distributed dividends before updating share valuation
-		self._unlock_profits()
 
 		self.total_assets += _assets
 		self.locked_profits += _assets
@@ -1115,16 +1141,13 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	# Share price will be the same (assets/supply) regardless of change in locked profit (but APR is diff)
 	if pool_assets_lost != 0:
 		# delegate fees not enough to eat losses. Socialize across pool
-		if self._calc_locked_profit() >= pool_assets_lost: 
+		if self.locked_profits >= pool_assets_lost:
 			# reduce APR but keep share price stable if possible
 			self.locked_profits -= pool_assets_lost
 		else:
 			# profit
 			self.locked_profits = 0
 
-	# correct current share price and distributed dividends after eating losses
-	self._unlock_profits()
-	
 	return (pool_assets_lost, fees_to_burn)
 	
 	# log price change after updates
@@ -1159,8 +1182,7 @@ def _convert_to_shares(_assets: uint256) -> uint256:
 	price: uint256 = self._virtual_price()
 	if price == 0: # prevent div by 0
 		return 0
-	return (_assets * PRICE_DECIMALS) / price # max() prevents div by 0 vs min(PRICE_DECIMALS, price())
-	# return (_assets * PRICE_DECIMALS) / min(PRICE_DECIMALS, min(1, self._virtual_price()))
+	return (_assets * PRICE_DECIMALS) / price # max() in _virtual_price prevents div by 0
 
 @internal
 @view
@@ -1179,10 +1201,6 @@ def _virtual_price() -> uint256:
 	@return
 		# of assets per share. denominated in pool/asset decimals (MUST be the same)
 	"""
-	# no share price if nothing minted/deposited
-	# if self._vault_assets() == 0 or self.total_supply == 0:
-	# 	return PRICE_DECIMALS
-	
 	assets: uint256 = self._vault_assets() # cache var to save SLOAD
 	if assets == 0:
 		return PRICE_DECIMALS
@@ -1618,7 +1636,9 @@ def previewWithdraw(_assets: uint256) -> uint256:
 	# TODO need if statement if share price is over/under 1. need to use total_assets vs total_supply
 	# e.g. if pool.price() < PRICE_DECIMALS: (max_value(uint256) - self.total_assets) else: (max_value(uint256) - self.total_supply)
 	# TODO include withdraw fees to assets 
-	return self._convert_to_shares(_assets) # if > totalSupply is ok
+	shares: uint256 = self._convert_to_shares(_assets)
+	return shares + self._convert_to_shares(self._calc_fee(shares, self.fees.withdraw))
+
 
 @external
 @view
@@ -1630,7 +1650,7 @@ def previewRedeem(_shares: uint256) -> uint256:
 	# TODO need if statement if share price is over/under 1. need to use total_assets vs total_supply
 	# e.g. if pool.price() < PRICE_DECIMALS: return self._convert_to_assets(max_redeemabl else: return self._convert_to_assets(max_redeemabl
 	# TODO FIX withdraw fees
-	return self._convert_to_assets(_shares)
+	return self._convert_to_assets(_shares) - self._convert_to_assets(self._calc_fee(_shares, self.fees.withdraw))
 	
 
 ### Pool view

@@ -439,10 +439,10 @@ def test_revenue_calculations_with_multiple_fees(
     referral_rev_event = _find_event_by({ 'fee_type': 32 }, logs)
     assert deposit_rev_event['fee_type'] == 2
     assert to_checksum_address(deposit_rev_event['receiver']) == admin
-    assert to_checksum_address(deposit_rev_event['payer']) == pool
+    assert to_checksum_address(deposit_rev_event['payer']) == pool.address
     assert referral_rev_event['fee_type'] == 16
     assert to_checksum_address(referral_rev_event['receiver']) == ZERO_ADDRESS
-    assert to_checksum_address(referral_rev_event['payer']) == pool
+    assert to_checksum_address(referral_rev_event['payer']) == pool.address
 
     # TODO check events emitted
 
@@ -513,30 +513,30 @@ def test_pittance_fees_emit_revenue_generated_event(
                 event = _find_event_by({ 'fee_type': 4 }, events)
                 assert event is not None
                 assert to_checksum_address(event['payer']) == me
-                assert to_checksum_address(event['token']) == pool 
+                assert to_checksum_address(event['token']) == pool.address
                 assert to_checksum_address(event['receiver']) == admin
             case 'flash':
                 event = _find_event_by({ 'fee_type': 8 }, events)
                 assert event is not None
-                assert to_checksum_address(event['payer']) == pool
-                assert to_checksum_address(event['token']) == base_asset 
+                assert to_checksum_address(event['payer']) == pool.address
+                assert to_checksum_address(event['token']) == base_asset.address
                 assert to_checksum_address(event['receiver']) == me
             case 'collector':
                 event = _find_event_by({ 'fee_type': 16 }, events)
                 assert event is not None
-                assert to_checksum_address(event['payer']) == pool
-                assert to_checksum_address(event['token']) == base_asset 
+                assert to_checksum_address(event['payer']) == pool.address
+                assert to_checksum_address(event['token']) == base_asset.address
                 assert to_checksum_address(event['receiver']) == me
             case 'referral':
                 event = _find_event_by({ 'fee_type': 32 }, events)
                 assert event is not None
-                assert to_checksum_address(event['payer']) == pool
-                assert to_checksum_address(event['token']) == pool 
+                assert to_checksum_address(event['payer']) == pool.address
+                assert to_checksum_address(event['token']) == pool.address
                 assert to_checksum_address(event['receiver']) == me
             case 'snitch':
                 event = _find_event_by({ 'fee_type': 64 }, events)
-                assert to_checksum_address(event['payer']) == pool
-                assert to_checksum_address(event['token']) == base_asset 
+                assert to_checksum_address(event['payer']) == pool.address
+                assert to_checksum_address(event['token']) == base_asset.address
                 assert to_checksum_address(event['receiver']) == me
 
         # print("find rev eevent", event.event_type.name, rev_event_type, rev_event_type == event.event_type.name, rev_event_type in e_types, fee_type)
@@ -766,8 +766,8 @@ def test_invariant_preview_incorporates_fees_into_share_price(pool, base_asset, 
     withdrawable_w_fee = pool.previewWithdraw(assets, sender=me)
 
     # TODO TEST fix withdraw fees
-    # assert redeemable_w_fee < assets and redeemable_w_fee > 0
-    # assert withdrawable_w_fee < shares and withdrawable_w_fee > 0
+    assert redeemable_w_fee < assets and redeemable_w_fee > 0
+    assert withdrawable_w_fee < shares and withdrawable_w_fee > 0
     assert redeemable_w_fee == expected_redeemable
     assert withdrawable_w_fee == shares
 
@@ -786,13 +786,13 @@ def test_invariant_preview_incorporates_fees_into_share_price(pool, base_asset, 
     assert mintable_w_fee == expected_mintable
     assert depositable_w_fee == expected_depositable
     
-    # if assets > 0:
-    #     pool.eval(f"self.total_deployed = {assets - 1}")
-    #     redeemable = pool.previewRedeem(shares)
-    #     withdrawable = pool.previewWithdraw(assets)
+    if assets > 0:
+        pool.eval(f"self.total_deployed = {assets - 1}")
+        redeemable = pool.previewRedeem(shares)
+        withdrawable = pool.previewWithdraw(assets)
         
-    #     assert redeemable == 1
-    #     assert withdrawable == 0
+        assert redeemable == 1
+        assert withdrawable == 0
 
 
 
