@@ -1,6 +1,7 @@
 # track nightly titanboa releases
 # git+https://github.com/vyperlang/titanoboa
-git+https://github.com/kibagateaux/titanoboa#fix/event-data-access # for experimental boa features
+# git+https://github.com/kibagateaux/titanoboa # for experimental boa features
+https://github.com/kibagateaux/titanoboa/archive/fix/event-data-access.zip # for experimental boa features
 hypothesis
 pytest
 pdbpp
