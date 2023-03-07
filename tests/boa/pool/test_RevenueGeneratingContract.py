@@ -347,7 +347,7 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
 
 
 @pytest.mark.pool
-# @pytest.mark.slow
+@pytest.mark.slow
 # @pytest.mark.rev_generator # What does this do?
 @given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
@@ -388,7 +388,7 @@ def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool):
     #
     assert False
 
-# TODO TEST: Need to implement.
+
 @pytest.mark.pool
 def test_max_uint_claim_rev_equals_claimable_rev(pool, admin):
     # give MAX_UNIT - 1 of revenue to delegate
