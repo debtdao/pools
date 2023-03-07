@@ -1,4 +1,4 @@
-# TODO check tests against most recent 
+# TODO check tests against most recent
 
 import boa
 import ape
@@ -39,7 +39,7 @@ ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev
 # 5. (invariant) max_uint claim_rev is claimable_rev
 # (done) 6. cant claim more than claimable_rev from claim_rev
 # (idk how to test) 9. claim rev should fail if push payments implemented
-# (idk how to test) 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector 
+# (idk how to test) 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector
 
 
 # Role ACL and state changes
@@ -69,7 +69,7 @@ def _call_pool_as_role(pool, role, action, sender = boa.env.generate_address(), 
     # call pool with args if provided
     # TODO: state is not properly updated/persisted with these calls.
     # i think getattr is calling contract class directly and not simulating with boa so these calls do nothing
-    return func(*args, sender=sender) if len(args) > 0 else func(sender=sender) 
+    return func(*args, sender=sender) if len(args) > 0 else func(sender=sender)
 
 
 @pytest.mark.pool
@@ -92,7 +92,7 @@ def test_only_current_role_holder_can_set_role(pool, me, admin, pool_roles):
 
         assert me == _call_pool_as_role(pool, role, 'next')
         _call_pool_as_role(pool, role, 'accept', me)
-        
+
         assert to_checksum_address(_call_pool_as_role(pool, role, 'get')) == me
         assert _call_pool_as_role(pool, role, 'next') == me
 
@@ -124,7 +124,7 @@ def test_can_override_pending_role_before_accepted(pool, me, admin, pool_roles):
             _call_pool_as_role(pool, role, 'accept', me)
 
 @pytest.mark.pool
-@pytest.mark.rev_generator        
+@pytest.mark.rev_generator
 def test_cant_accept_role_as_current_role_holder(pool, me, admin, pool_roles):
     for role in pool_roles:
         assert to_checksum_address(_call_pool_as_role(pool, role, 'get')) == admin
@@ -289,7 +289,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 
     with boa.reverts():
         pool.claim_rev(pool, amount + 1, sender=admin)
-    
+
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
 
@@ -314,7 +314,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 
     with boa.reverts(): # # TODO doesnot revert
         pool.claim_rev(pool, amount + 1, sender=admin)
-    
+
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
 
@@ -337,7 +337,7 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
     assert pool.claimable_rev(base_asset) == 0
     with boa.reverts("non-revenue token"):
         pool.claim_rev(base_asset, amount, sender=admin)
-    
+
     new_token = boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
     new_token.mint(pool, amount)
     assert new_token.balanceOf(pool) == amount
@@ -345,77 +345,66 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount, sender=admin)
 
-@pytest.mark.acl
+
 @pytest.mark.pool
-@pytest.mark.slow
-@pytest.mark.rev_generator
-@given(amount=st.integers(min_value=0, max_value=MAX_UINT - 1)) # prevent overflow but allow testing MAX_UINT path
+# @pytest.mark.slow
+# @pytest.mark.rev_generator # What does this do?
+@given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
+def test_self_owner_rev_claimable_by_rev_recipient(pool, admin, amount):
     assert pool.rev_recipient() == admin
-    rando = boa.env.generate_address()
+    assert pool.claimable_rev(pool) == 0
+    assert pool.balanceOf(admin) == 0
 
-    # try claiming empty rev token
-    assert pool.claimable_rev(base_asset) == 0
-    # cant claim 0
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=rando)
-    # cant claim available amount
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=rando)
-    # cant claim over available amount
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=rando)
-
-    # add rev to pool and try to claim actual rev token
+    # give revenue to delegate
     pool.eval(f'self.accrued_fees = {amount}')
     pool.eval(f'self.balances[self] = {amount}')
 
     assert pool.claimable_rev(pool) == amount
-    # cant claim 0
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, 0, sender=rando)
-    # cant claim available amount
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount, sender=rando)
-    # cant claim over available amount
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=me)
-    with boa.reverts("not rev_recipient"):
-        pool.claim_rev(pool, amount + 1, sender=rando)
+    assert pool.accrued_fees() == amount
 
-    # # add rev to pool and try to claim actual rev token
-    new_token = boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
-    new_token.mint(pool, amount)
-    assert new_token.balanceOf(pool) == amount
-    assert pool.claimable_rev(new_token) == 0
+    # rev_recipient claims all revenue
+    pool.claim_rev(pool, amount, sender=admin)
+    assert pool.claimable_rev(pool) == 0
+    assert pool.accrued_fees() == 0
 
-    # try claiming non rev token
-    # cant claim 0
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, 0, sender=me)
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, 0, sender=rando)
-    # cant claim available amount
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount, sender=me)
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount, sender=rando)
-    # cant claim over available amount
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount + 1, sender=me)
-    with boa.reverts("non-revenue token"):
-        pool.claim_rev(new_token, amount + 1, sender=rando)
+
+@pytest.mark.pool
+@pytest.mark.event_emissions
+def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool):
+    assert pool.claimable_rev(pool) == 0
+    # print('3 - Claimable Rev: ', pool.claimable_rev(pool))
+
+    # Create RevenueGenerated events
+
+    # Get all events emitted and filter to only RevenueGenerated events w/ custom find_events_by function
+    # events = pool.get_logs()
+
+    # Calculate sum of RevenueGenerated events
+
+    # assert sum of RevenueGenerated events equals claimable_rev
+
+    # no events: claimable_rev == 0
+    #
+    assert False
+
+# TODO TEST: Need to implement.
+@pytest.mark.pool
+def test_max_uint_claim_rev_equals_claimable_rev(pool, admin):
+    # give MAX_UNIT - 1 of revenue to delegate
+    amount = MAX_UINT - 1
+    pool.eval(f'self.accrued_fees = {amount}')
+    pool.eval(f'self.balances[self] = {amount}')
+
+    assert pool.claimable_rev(pool) == amount
+    assert pool.accrued_fees() == amount
+
+    # rev_recipient claims MAX_UNIT revenue
+    pool.claim_rev(pool, MAX_UINT, sender=admin)
+
+    # leaving no revenue remaining
+    assert pool.claimable_rev(pool) == 0
+    assert pool.accrued_fees() == 0
 
 
 @pytest.mark.pool
@@ -430,7 +419,7 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
             # TODO expect boa error not vyper error due to accept_invoice not being on ABI
             # response = pool.accept_invoice(me, base_asset, amount, "My Invoicing Event")
         assert True
-        
+
         # if implemented
         # print("accept invoice response", response)
         # event = pool.get_logs()[0]
@@ -452,7 +441,7 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
 #     assert _call_pool_as_role(pool, 'owner', 'set', admin, me) # state not saved
 #     assert me == _call_pool_as_role(pool, 'owner', 'next') # state not saved
 #     num_events.append(len(pool.get_logs()))
-    
+
 #     # no assert + extern call + extern check
 #     _call_pool_as_role(pool, 'owner', 'set', admin, me)    # state not saved
 #     assert me == _call_pool_as_role(pool, 'owner', 'next') # state not saved

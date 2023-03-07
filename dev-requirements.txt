@@ -12,3 +12,5 @@ vyper==0.3.7
 # Latest releases of vyper and boa are usually incompatible
 # git+https://github.com/vyperlang/vyper.git
 ipython
+eth-ape
+ape-vyper
