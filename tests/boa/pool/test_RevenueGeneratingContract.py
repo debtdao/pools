@@ -161,8 +161,14 @@ def test_setting_role_emits_pending_role_event(pool, me, admin, pool_roles):
         _call_pool_as_role(pool, role, 'set', admin, me)
 
         event = pool.get_logs()[0]
+        print('Event: ', event)
+        print('Me: ', me)
+        # print('Checksum Address: ', to_checksum_address(event.event_type.arguments['new_recipient']))
+        # assert to_checksum_address(event.event_type.arguments['new_recipient']) == me
         assert to_checksum_address(event.args_map['new_recipient']) == me
+        print('Do I get here 1?')
         capitalcase_role = ''.join(map(lambda word: word.title(), role.split('_')))
+        print('Do I get here 2?')
         assert f'{event.event_type}' == f'event NewPending{capitalcase_role}(address)'
 
 
@@ -370,15 +376,36 @@ def test_self_owner_rev_claimable_by_rev_recipient(pool, admin, amount):
 
 
 @pytest.mark.pool
+# @pytest.mark.rev_generator
 @pytest.mark.event_emissions
-def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool):
-    assert pool.claimable_rev(pool) == 0
+def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, _gen_rev):
+    total_fees = 0
+    assert pool.claimable_rev(pool) == total_fees
+
     # print('3 - Claimable Rev: ', pool.claimable_rev(pool))
 
+    # n == 1
+    # Create RevenueGenerated event
+    events = pool.get_logs()
+    print('Events: ', events);
+    fee_type = 'deposit'
+    amount = 1000
+    print('Fee Parameters: ', fee_type, amount)
+    rev_data = _gen_rev(fee_type, amount)
+    print('Revenue Data: ', rev_data)
+
+    # event = rev_data['event']
+    # total_fees += event['revenue']
+    # print('Event Revenue: ', event['revenue'])
+    # print('Total Fees: ', total_fees)
+    # Calculate sum of RevenueGenerated events
+    # assert sum of RevenueGenerated events equals claimable revenue
+
+    # n == 2, n > 2
     # Create RevenueGenerated events
 
     # Get all events emitted and filter to only RevenueGenerated events w/ custom find_events_by function
-    # events = pool.get_logs()
+
 
     # Calculate sum of RevenueGenerated events
 
@@ -386,7 +413,7 @@ def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool):
 
     # no events: claimable_rev == 0
     #
-    assert False
+    assert pool.claimable_rev(pool) == total_fees
 
 
 @pytest.mark.pool
