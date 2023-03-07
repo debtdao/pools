@@ -407,6 +407,79 @@ def test_max_uint_claim_rev_equals_claimable_rev(pool, admin):
     assert pool.accrued_fees() == 0
 
 
+@pytest.mark.acl
+@pytest.mark.pool
+@pytest.mark.slow
+@pytest.mark.rev_generator
+@given(amount=st.integers(min_value=0, max_value=MAX_UINT - 1)) # prevent overflow but allow testing MAX_UINT path
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_non_rev_recipient_cant_claim_rev(pool, admin, me, base_asset, amount):
+    assert pool.rev_recipient() == admin
+    rando = boa.env.generate_address()
+
+    # try claiming empty rev token
+    assert pool.claimable_rev(base_asset) == 0
+    # cant claim 0
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, 0, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, 0, sender=rando)
+    # cant claim available amount
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount, sender=rando)
+    # cant claim over available amount
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount + 1, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount + 1, sender=rando)
+
+    # add rev to pool and try to claim actual rev token
+    pool.eval(f'self.accrued_fees = {amount}')
+    pool.eval(f'self.balances[self] = {amount}')
+
+    assert pool.claimable_rev(pool) == amount
+    # cant claim 0
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, 0, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, 0, sender=rando)
+    # cant claim available amount
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount, sender=rando)
+    # cant claim over available amount
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount + 1, sender=me)
+    with boa.reverts("not rev_recipient"):
+        pool.claim_rev(pool, amount + 1, sender=rando)
+
+    # # add rev to pool and try to claim actual rev token
+    new_token = boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
+    new_token.mint(pool, amount)
+    assert new_token.balanceOf(pool) == amount
+    assert pool.claimable_rev(new_token) == 0
+
+    # try claiming non rev token
+    # cant claim 0
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, 0, sender=me)
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, 0, sender=rando)
+    # cant claim available amount
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, amount, sender=me)
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, amount, sender=rando)
+    # cant claim over available amount
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, amount + 1, sender=me)
+    with boa.reverts("non-revenue token"):
+        pool.claim_rev(new_token, amount + 1, sender=rando)
+
+
 @pytest.mark.pool
 @pytest.mark.rev_generator
 @pytest.mark.event_emissions
