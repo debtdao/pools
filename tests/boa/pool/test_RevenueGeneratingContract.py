@@ -2,6 +2,7 @@
 
 import boa
 import ape
+import math
 from eth_utils import to_checksum_address
 import pytest
 import logging
@@ -10,11 +11,16 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
+
+from tests.boa.pool.test_pool import _is_pittance_fee
 from ..utils.events import _find_event
 
-MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
-MAX_TOKEN_AMOUNT = MAX_UINT - 10**25 # offset by existing admin balance so no overflows
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO, DRATE, FRATE, INTEREST_TIMESPAN_SEC, ONE_YEAR_IN_SEC,  FEE_COEFFICIENT, MAX_PITTANCE_FEE
+from ..conftest import MAX_UINT, ZERO_ADDRESS, POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
+
+# MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+# MAX_TOKEN_AMOUNT = MAX_UINT - 10**25 # offset by existing admin balance so no overflows
+# ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 
 
@@ -161,14 +167,8 @@ def test_setting_role_emits_pending_role_event(pool, me, admin, pool_roles):
         _call_pool_as_role(pool, role, 'set', admin, me)
 
         event = pool.get_logs()[0]
-        print('Event: ', event)
-        print('Me: ', me)
-        # print('Checksum Address: ', to_checksum_address(event.event_type.arguments['new_recipient']))
-        # assert to_checksum_address(event.event_type.arguments['new_recipient']) == me
         assert to_checksum_address(event.args_map['new_recipient']) == me
-        print('Do I get here 1?')
         capitalcase_role = ''.join(map(lambda word: word.title(), role.split('_')))
-        print('Do I get here 2?')
         assert f'{event.event_type}' == f'event NewPending{capitalcase_role}(address)'
 
 
@@ -376,44 +376,47 @@ def test_self_owner_rev_claimable_by_rev_recipient(pool, admin, amount):
 
 
 @pytest.mark.pool
-# @pytest.mark.rev_generator
+@pytest.mark.slow
+@pytest.mark.rev_generator
 @pytest.mark.event_emissions
-def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, _gen_rev):
-    total_fees = 0
-    assert pool.claimable_rev(pool) == total_fees
+@pytest.mark.invariant
+@given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
+        perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
+        amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=10, deadline=timedelta(seconds=1000))
+def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, pool_fee_types, admin, _gen_rev, pittance_fee, perf_fee, amount):
+    """ Emits one event for each fee type (i.e. performance, deposit, etc.)
+        Gets revenue from each event and adds to total_revenue.
+        Checks that total_revenue equals claimable_rev(pool).
+    """
+    total_revenue = 0
+    assert pool.claimable_rev(pool) == total_revenue
 
-    # print('3 - Claimable Rev: ', pool.claimable_rev(pool))
+    pool.eval(SET_FEES_TO_ZERO)
+    pool.eval("self.accrued_fees = 0")
+    print('Pool Fee Types: ', pool_fee_types)
+    print('\n')
+    counter = 0
+    for fee_type in pool_fee_types:
+        print(f'Fee Type - {counter}: ', fee_type)
+        fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
 
-    # n == 1
-    # Create RevenueGenerated event
-    events = pool.get_logs()
-    print('Events: ', events);
-    fee_type = 'deposit'
-    amount = 1000
-    print('Fee Parameters: ', fee_type, amount)
-    rev_data = _gen_rev(fee_type, amount)
-    print('Revenue Data: ', rev_data)
+        set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
+        set_fee(fee_bps, sender=admin)
+        assert fee_bps == pool.eval(f'self.fees.{fee_type}')
 
-    # event = rev_data['event']
-    # total_fees += event['revenue']
-    # print('Event Revenue: ', event['revenue'])
-    # print('Total Fees: ', total_fees)
-    # Calculate sum of RevenueGenerated events
-    # assert sum of RevenueGenerated events equals claimable revenue
+        rev_data = _gen_rev(fee_type, amount)
+        event = rev_data['event']
 
-    # n == 2, n > 2
-    # Create RevenueGenerated events
-
-    # Get all events emitted and filter to only RevenueGenerated events w/ custom find_events_by function
-
-
-    # Calculate sum of RevenueGenerated events
-
-    # assert sum of RevenueGenerated events equals claimable_rev
-
-    # no events: claimable_rev == 0
-    #
-    assert pool.claimable_rev(pool) == total_fees
+        total_revenue += event['revenue']
+        # assert event['revenue'] == pittance_fee_rev if _is_pittance_fee(fee_type) else performance_fee_rev
+        print('Event Rev: ', event['revenue'])
+        print('Claimable Rev: ', pool.claimable_rev(pool))
+        print('Total Event Rev: ', total_revenue)
+        print("\n")
+        # assert event['revenue'] == fee_rev
+        assert pool.claimable_rev(pool) == total_revenue
+        counter += 1
 
 
 @pytest.mark.pool

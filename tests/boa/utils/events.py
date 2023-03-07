@@ -12,7 +12,7 @@ def _find_event(name: str, events: List[Event]) -> Event | None:
             return None
 
 def _find_event_by(where: object, events: List[Event]) -> Event | None:
-        print("all events", events)
+        # print("all events", events)
         event = None
         for e in events:
             passed = True
