@@ -369,7 +369,7 @@ def test_self_owner_rev_claimable_by_rev_recipient(pool, pool_fee_types, admin, 
 @given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
         perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
         amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=10, deadline=timedelta(seconds=1000))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, pool_fee_types, admin, _gen_rev, pittance_fee, perf_fee, amount):
     """ Emits one event for each fee type (i.e. performance, deposit, etc.)
         Gets revenue from each event and adds to total_revenue.
