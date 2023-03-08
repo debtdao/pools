@@ -98,7 +98,6 @@ def addCredit(
     
     return id
 
-
 @internal
 def _set_rates(id: bytes32, drate: uint128, frate: uint128): 
     self.rates[id] = Rate({ drate: drate, frate: frate, last_accrued: block.timestamp })

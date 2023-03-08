@@ -17,7 +17,7 @@ FEE_COEFFICIENT = 10000 # 100% in bps
 MAX_PITTANCE_FEE = 200 # 2% in bps
 
 # TODO Ask ChatGPT to generate test cases in vyper
-# TODO copy test over  https://github.com/fubuloubu/ERC4626/blob/main/tests/test_methods.py
+# TODO TEST copy test over https://github.com/fubuloubu/ERC4626/blob/main/tests/test_methods.py
 
 # TEST all 4626 unit tests on preview functions. then compare preview func to actual action func 
 # (only diff between preview and action is side effects - state and events 
@@ -111,8 +111,6 @@ def test_deposit(pool, base_asset, me, admin, init_token_balances,
 
     assert to_checksum_address(deposit_event.args_map['owner']) == me
     assert to_checksum_address(deposit_event.args_map['sender']) == me
-    
-    # if shares > 0:
     assert deposit_event.args_map['assets'] == amount
     assert deposit_event.args_map['shares'] == shares_created
 
@@ -207,6 +205,12 @@ def test_mint(pool, base_asset, me, admin, init_token_balances,
     assert to_checksum_address(mint_rev_event.args_map['payer']) == pool.address
     assert to_checksum_address(mint_rev_event.args_map['token']) == pool.address
     assert to_checksum_address(mint_rev_event.args_map['receiver']) == pool.owner()
+
+    # TODO TEST implement from deposit copypasta
+    # assert base_asset.balanceOf(pool) == INIT_POOL_BALANCE + amount
+    # assert pool.totalSupply() == shares + shares_created + pool.accrued_fees()
+    # assert pool.balanceOf(me) == init_token_balances + shares_created
+    # assert shares_created == expected_shares # TODO TEST rounding error
 
 
 @pytest.mark.ERC4626
@@ -621,7 +625,7 @@ def test_invariant_preview_equals_realized_share_price(
     assert depositable == deposited
 
 # (done) preview functions - right share price return value
-# (semi-done)preview functions - proper fees calculated
+# (semi-done) preview functions - proper fees calculated
 # (done) preview -> action equality
 # (done) mint/redeem + deposit/withdraw equality (incl fees)
 

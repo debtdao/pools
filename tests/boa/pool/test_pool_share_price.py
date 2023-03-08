@@ -82,7 +82,7 @@ def test_pool_price_doesnt_change_on_deposit_withdraw_with_no_fees(pool, me, amo
 def test_calling_unlock_profit_releases_all_available_profit(
     pool, me, base_asset,
     total_profit, vesting_time, vesting_rate,
-):  
+):
     base_asset.mint(pool, total_profit)
     pool.eval(f"self.total_assets = {total_profit}")
     pool.eval(f"self.locked_profits = {total_profit}")

@@ -1,7 +1,0 @@
-eth-ape
-ape-vyper
-# ape-etherscan
-# ape-alchemy
-# ape-hardhat
-# ape-ledger
-

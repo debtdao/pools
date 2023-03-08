@@ -15,7 +15,7 @@ def _to_shares(assets: int, price: int) -> int:
         return 0
     
     return math.floor(math.floor(assets * POOL_PRICE_DECIMALS) / max(1, price))
-        
+  
 
 def _to_assets(shares: int, price: int) -> int:
     if price == 0:
