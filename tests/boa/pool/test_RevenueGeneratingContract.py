@@ -284,31 +284,6 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
-@given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
-    # test max claim shortcut
-    pool.eval(f'self.accrued_fees = {amount}')
-    pool.eval(f'self.balances[self] = {amount}')
-    assert pool.claimable_rev(pool) == amount
-    assert pool.accrued_fees() == amount
-
-    with boa.reverts():
-        pool.claim_rev(pool, amount + 1, sender=admin)
-
-    assert pool.claimable_rev(pool) == amount
-    assert pool.accrued_fees() == amount
-
-    pool.claim_rev(pool, amount, sender=admin)
-
-    event = pool.get_logs()[ClaimRevenueEventLogIndex]
-    assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
-    assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == amount
-    assert pool.claimable_rev(pool) == 0
-
-@pytest.mark.pool
-@pytest.mark.rev_generator
 @given(amount=st.integers(min_value=1, max_value=MAX_UINT - 2)) # ensure we dont hit MAX_UINT special case
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
