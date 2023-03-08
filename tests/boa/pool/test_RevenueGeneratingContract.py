@@ -309,6 +309,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 
 
 @pytest.mark.pool
+@pytest.mark.slow
 @pytest.mark.rev_generator
 @given(amount=st.integers(min_value=0, max_value=MAX_UINT))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
@@ -329,25 +330,38 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
 
 @pytest.mark.pool
 @pytest.mark.slow
-# @pytest.mark.rev_generator # What does this do?
-@given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
+@pytest.mark.invariant
+@pytest.mark.rev_generator
+# @given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
+@given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
+        perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
+        amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_self_owner_rev_claimable_by_rev_recipient(pool, admin, amount):
+def test_self_owner_rev_claimable_by_rev_recipient(pool, pool_fee_types, admin, me, _gen_rev, pittance_fee, perf_fee, amount):
+
     assert pool.rev_recipient() == admin
     assert pool.claimable_rev(pool) == 0
-    assert pool.balanceOf(admin) == 0
 
-    # give revenue to delegate
-    pool.eval(f'self.accrued_fees = {amount}')
-    pool.eval(f'self.balances[self] = {amount}')
+    pool.eval(SET_FEES_TO_ZERO)
+    pool.eval("self.accrued_fees = 0")
 
-    assert pool.claimable_rev(pool) == amount
-    assert pool.accrued_fees() == amount
+    # Create RevenueGenerated event for each pool fee type
+    for fee_type in pool_fee_types:
+        fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
 
-    # rev_recipient claims all revenue
-    pool.claim_rev(pool, amount, sender=admin)
-    assert pool.claimable_rev(pool) == 0
-    assert pool.accrued_fees() == 0
+        set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
+        set_fee(fee_bps, sender=admin)
+        assert fee_bps == pool.eval(f'self.fees.{fee_type}')
+
+        # Create RevenueGenerated event
+        rev_data = _gen_rev(fee_type, amount)
+        event = rev_data['event']
+
+        # Check that event revenue is same as revenue claimable by rev_recipient
+        claimable_rev = pool.claimable_rev(pool)
+        rev_claimed = pool.claim_rev(pool, claimable_rev, sender=admin)
+        assert rev_claimed == True
+        assert pool.claimable_rev(pool) == 0
 
 
 @pytest.mark.pool
@@ -366,14 +380,9 @@ def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, pool_fe
     """
     total_revenue = 0
     assert pool.claimable_rev(pool) == total_revenue
-
     pool.eval(SET_FEES_TO_ZERO)
     pool.eval("self.accrued_fees = 0")
-    print('Pool Fee Types: ', pool_fee_types)
-    print('\n')
-    counter = 0
     for fee_type in pool_fee_types:
-        print(f'Fee Type - {counter}: ', fee_type)
         fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
 
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
@@ -384,17 +393,12 @@ def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, pool_fe
         event = rev_data['event']
 
         total_revenue += event['revenue']
-        # assert event['revenue'] == pittance_fee_rev if _is_pittance_fee(fee_type) else performance_fee_rev
-        print('Event Rev: ', event['revenue'])
-        print('Claimable Rev: ', pool.claimable_rev(pool))
-        print('Total Event Rev: ', total_revenue)
-        print("\n")
-        # assert event['revenue'] == fee_rev
         assert pool.claimable_rev(pool) == total_revenue
-        counter += 1
 
 
 @pytest.mark.pool
+@pytest.mark.rev_generator
+@pytest.mark.invariant
 def test_max_uint_claim_rev_equals_claimable_rev(pool, admin):
     # give MAX_UNIT - 1 of revenue to delegate
     amount = MAX_UINT - 1

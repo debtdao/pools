@@ -77,7 +77,7 @@ def init_token_balances(base_asset, pool, admin, me):
     base_asset.mint(me, INIT_USER_POOL_BALANCE, sender=me)
     base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=me)
     shares = pool.deposit(INIT_USER_POOL_BALANCE, me, sender=me)
-        
+
     base_asset.mint(admin, INIT_USER_POOL_BALANCE, sender=admin)
     base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=admin)
     shares2 = pool.deposit(INIT_USER_POOL_BALANCE, admin, sender=admin)

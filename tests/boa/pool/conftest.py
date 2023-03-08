@@ -129,7 +129,7 @@ def _repay(mock_line, base_asset, me):
             line.close(sender=payer)
         else:
             line.depositAndRepay(id, amount, sender=payer)
-        
+
     return repay
 
 
@@ -145,7 +145,7 @@ def _collect_interest(pool, mock_line, base_asset, admin, flash_borrower, _add_c
             _repay(line, id, interest_earned)
             pool.collect_interest(line, id, sender=flash_borrower.address)
         return interest_earned, id
-        
+
     return collect_interest
 
 
@@ -157,7 +157,6 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
         @return - [fee_type, amount_generated]
         """
         # print(f"generate revenue helper type/event  :  {fee_type}")
-
         match fee_type:
             case 'performance':
                 interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
@@ -175,7 +174,7 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
                     'shares': shares,
                 }
             case 'withdraw':
-                _deposit(amount, me) 
+                _deposit(amount, me)
                 shares = pool.withdraw(amount, me, me, sender=me)
                 # print("withdraw fee", 0)
                 return {
