@@ -1,14 +1,22 @@
-# track nightly titanboa releases
-# git+https://github.com/vyperlang/titanoboa
-git+https://github.com/kibagateaux/titanoboa # for experimental boa features
-hypothesis
-pytest
-pdbpp
-jedi
-pytest-xdist
-pytest-forked
-vyper==0.3.7
 # track nightly vyper releases (need for raw_revert so we can use custom errors)
 # Latest releases of vyper and boa are usually incompatible
 # git+https://github.com/vyperlang/vyper.git
+vyper==0.3.7
+
+# track nightly titanboa releases
+# git+https://github.com/vyperlang/titanoboa
+git+https://github.com/kibagateaux/titanoboa # for experimental boa features
+
+# Ape Framework 
+eth-ape
+eth-vyper
+# ape-etherscan
+
+# python testing frameworks
+hypothesis
+pytest
+jedi
+pytest-xdist
+pytest-forked
+pdbpp
 ipython

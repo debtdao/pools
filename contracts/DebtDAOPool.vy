@@ -495,8 +495,6 @@ def accept_owner() -> bool:
 	log AcceptOwner(new_owner)
 	return True
 
-# THS IS COOL^
-
 @external
 def set_min_deposit(new_min: uint256)  -> bool:
 	assert msg.sender == self.owner, "not owner"
@@ -1129,8 +1127,8 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	# burn owner fees to cover losses
 	self.accrued_fees -= fees_to_burn
 	self._burn(self, fees_to_burn)
-
 	pool_assets_lost: uint256 = _assets - fee_assets
+
 	log named_uint("fees_shares_burn", fees_to_burn)
 	log named_uint("fee_assets_burned", fee_assets)
 	log named_uint("total_to_burn", total_to_burn)

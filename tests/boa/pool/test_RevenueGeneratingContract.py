@@ -331,6 +331,13 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 @pytest.mark.rev_generator
 @given(amount=st.integers(min_value=0, max_value=MAX_UINT))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_func_name_invariant_blahlbah(pool, admin, base_asset, amount):
+    assert False
+
+@pytest.mark.pool
+@pytest.mark.rev_generator
+@given(amount=st.integers(min_value=0, max_value=MAX_UINT))
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
     base_asset.mint(pool, amount)
     assert base_asset.balanceOf(pool) == amount

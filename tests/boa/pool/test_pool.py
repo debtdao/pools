@@ -23,6 +23,7 @@ ZERO_BYTES32 = "0x00000000000000000000000000000000000000000000000000000000000000
 # (done) max flash loan == max liquid
 # owner never gets collector fees on collect_interest, reduce_credit, impair, or divest_vault
 
+# 4626 Vault Invest/Divest
 
 # (done) owner priviliges on investment functions
 # vault_investment goes up by _amount 
@@ -43,7 +44,7 @@ ZERO_BYTES32 = "0x00000000000000000000000000000000000000000000000000000000000000
 
 # (done) fee updates in state
 # (done) fee update emits SetXFee event with X params and FEE_TYPES.Y
-# fee updates affect deposit/withdraw pricing
+# (done) fee updates affect deposit/withdraw pricing
 # (done) fees emitted properly in RevenueGenerated
 
 

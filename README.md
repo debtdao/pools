@@ -4,7 +4,7 @@ TODO:
 -   https://curve.readthedocs.io/guide-code-style.html
 
 ## Installation
-
+Make sure `python --version` emits >= 3.10.0
 ```bash
    pip install -r prod-requirements.txt
    pip install -r dev-requirements.txt
@@ -59,7 +59,6 @@ $ >>>>> pool.eval(f'self.balances[self] = 100')
 $ >>>>> pool.claim_rev(pool.address, 10, sender=admin)
 $ >>>>> pool.line_profile().summary()
 ```
-
 ### Tips
 
 1. Must redeploy contracts with `boa.load` for code changes to take affect.
