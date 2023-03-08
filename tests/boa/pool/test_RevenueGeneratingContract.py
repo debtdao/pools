@@ -329,7 +329,6 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
 @pytest.mark.slow
 @pytest.mark.invariant
 @pytest.mark.rev_generator
-# @given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
 @given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
         perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
         amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
