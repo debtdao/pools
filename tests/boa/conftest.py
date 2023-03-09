@@ -59,9 +59,9 @@ def _deposit(pool, base_asset):
         base_asset.mint(receiver, amount)
         base_asset.approve(pool, amount, sender=receiver)
         if referrer:
-            pool.depositWithReferral(amount, receiver, referrer, sender=receiver)
+            return pool.depositWithReferral(amount, receiver, referrer, sender=receiver)
         else:
-            pool.deposit(amount, receiver, sender=receiver)
+            return pool.deposit(amount, receiver, sender=receiver)
     return deposit
 
 
