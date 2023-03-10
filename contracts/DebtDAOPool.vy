@@ -161,7 +161,7 @@ max_assets: public(uint256)
 # @dev 0 <= total_deployed <= total_assets + debt_principal
 total_deployed: public(uint256)
 # amount of assets held by external 4626 vaults. used to calc profit/loss on non-line investments
-vault_investments: HashMap[address, uint256]
+vault_investments: public(HashMap[address, uint256])
 # how much loss we realized on position at time of impairment. Can still theoretically repay with future revenue
 impairments: public(HashMap[address, uint256])
 # total notional amount of ASSET borrowed from lines. Does not include interest owed.

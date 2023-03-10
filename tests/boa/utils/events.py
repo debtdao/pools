@@ -20,4 +20,9 @@ def _find_event_by(where: object, events: List[Event]) -> Event | None:
             for attr in where:
                 if attr in keys and e.args_map[attr] == where[attr]:
                     # print(f"abstradct event check passed, {e.args_map}")
-                    return e.args_map
+                    continue
+                else:
+                     passed = False
+            
+            if passed:
+                return e.args_map
