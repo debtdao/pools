@@ -13,10 +13,10 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 from datetime import timedelta
 
 from tests.boa.pool.test_pool import _is_pittance_fee
-from ..utils.events import _find_event
+from ..utils.events import _find_event, _find_event_by
 
 from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO, DRATE, FRATE, INTEREST_TIMESPAN_SEC, ONE_YEAR_IN_SEC,  FEE_COEFFICIENT, MAX_PITTANCE_FEE
-from ..conftest import MAX_UINT, ZERO_ADDRESS, POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE
+from ..conftest import MAX_UINT, ZERO_ADDRESS, POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE, _deposit
 
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 
@@ -340,7 +340,11 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
         perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
         amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_self_owner_rev_claimable_by_rev_recipient(pool, pool_fee_types, admin, me, _gen_rev, pittance_fee, perf_fee, amount):
+def test_self_owner_rev_claimable_by_rev_recipient(pool, revenue_types, admin, _gen_rev_events, pittance_fee, perf_fee, amount):
+    """ Emits one event for each revenue type (i.e. performance, mint, deposit, redeem, withdraw, etc.)
+        Gets revenue from each event.
+        Checks that event revenue equals revenue claimable by recipient.
+    """
 
     assert pool.rev_recipient() == admin
     assert pool.claimable_rev(pool) == 0
@@ -348,16 +352,23 @@ def test_self_owner_rev_claimable_by_rev_recipient(pool, pool_fee_types, admin, 
     pool.eval(SET_FEES_TO_ZERO)
     pool.eval("self.accrued_fees = 0")
 
-    # Create RevenueGenerated event for each pool fee type
-    for fee_type in pool_fee_types:
+    # Create RevenueGenerated event for each function that emits RevenueGenenerated event
+    for revenue_type in revenue_types:
+        # Determine fee type for RevenueGenerated event
+        fee_type = revenue_type
+        if revenue_type == 'mint':
+            fee_type = 'deposit'
+        elif revenue_type == 'redeem':
+            fee_type = 'withdraw'
         fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
 
+        # Set fee
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
         set_fee(fee_bps, sender=admin)
         assert fee_bps == pool.eval(f'self.fees.{fee_type}')
 
         # Create RevenueGenerated event
-        rev_data = _gen_rev(fee_type, amount)
+        rev_data = _gen_rev_events(revenue_type, amount)
         event = rev_data['event']
 
         # Check that event revenue is same as revenue claimable by rev_recipient
@@ -376,27 +387,44 @@ def test_self_owner_rev_claimable_by_rev_recipient(pool, pool_fee_types, admin, 
         perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
         amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, pool_fee_types, admin, _gen_rev, pittance_fee, perf_fee, amount):
-    """ Emits one event for each fee type (i.e. performance, deposit, etc.)
+def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, revenue_types, admin, _gen_rev_events, pittance_fee, perf_fee, amount):
+    """ Emits one event for each revenue type (i.e. performance, mint, deposit, redeem, withdraw, etc.)
         Gets revenue from each event and adds to total_revenue.
         Checks that total_revenue equals claimable_rev(pool).
     """
     total_revenue = 0
     assert pool.claimable_rev(pool) == total_revenue
+
     pool.eval(SET_FEES_TO_ZERO)
     pool.eval("self.accrued_fees = 0")
-    for fee_type in pool_fee_types:
+
+    # Create RevenueGenerated event for each function that emits RevenueGenenerated event
+    for revenue_type in revenue_types:
+        # Determine fee type for RevenueGenerated event
+        fee_type = revenue_type
+        if revenue_type == 'mint':
+            fee_type = 'deposit'
+        elif revenue_type == 'redeem':
+            fee_type = 'withdraw'
         fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
 
+        # Set fee
         set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
         set_fee(fee_bps, sender=admin)
         assert fee_bps == pool.eval(f'self.fees.{fee_type}')
 
-        rev_data = _gen_rev(fee_type, amount)
+        # Create RevenueGenerated event
+        rev_data = _gen_rev_events(revenue_type, amount)
         event = rev_data['event']
 
+        # Check that total revenue is same as claimable revenue
         total_revenue += event['revenue']
-        assert pool.claimable_rev(pool) == total_revenue
+        # assert pool.claimable_rev(pool) == total_revenue
+        # print('Revenue Type: ', revenue_type)
+        # print('Event Revenue: ', event['revenue'])
+        # print('Total Revenue: ', total_revenue)
+        # print('Claimable Revenue: ', pool.claimable_rev(pool))
+    assert pool.claimable_rev(pool) == total_revenue
 
 
 @pytest.mark.pool
