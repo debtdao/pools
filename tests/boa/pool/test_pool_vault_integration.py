@@ -1,5 +1,6 @@
 import boa
 import ape
+import math
 from eth_utils import to_checksum_address
 import pytest
 import logging
@@ -17,7 +18,7 @@ from ..utils.events import _find_event, _find_event_by
 # get right shares back for assets deposited against vault price (do it 2x)
 # properly increase initial principal (do it 2x)
 
-def test_invest_vault_only_owner_can_call(pool, vault, admin, me, init_token_balances, _deposit):
+def test_invest_vault_only_owner_can_call(pool, vault, admin, me, init_token_balances):
     with boa.reverts():
         pool.invest_vault(vault, 100, sender=me)
     with boa.reverts():
@@ -26,7 +27,7 @@ def test_invest_vault_only_owner_can_call(pool, vault, admin, me, init_token_bal
     pool.invest_vault(vault, 100, sender=admin)
 
 
-def test_invest_vault(pool, vault, base_asset, admin, me, init_token_balances, _deposit):
+def test_invest_vault(pool, vault, base_asset, admin, me, init_token_balances):
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.total_deployed() == 0
@@ -60,7 +61,7 @@ def test_invest_vault(pool, vault, base_asset, admin, me, init_token_balances, _
     
 
 
-def test_invest_vault_2x(pool, vault, base_asset, admin, me, init_token_balances, _deposit):
+def test_invest_vault_2x(pool, vault, base_asset, admin, me, init_token_balances):
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.total_deployed() == 0
@@ -109,11 +110,6 @@ def test_invest_vault_2x(pool, vault, base_asset, admin, me, init_token_balances
     assert invest_event2['shares'] > INIT_USER_POOL_BALANCE # mintflation from first depoist gives us more shares in second deposit
     assert invest_event2['shares'] == deposit_event2['shares']
     assert invest_event2['shares'] == deposit_rev_event2['amount']
-
-    # TODO TEST rounding errors
-    # expected_shares = 
-    # assert invest_event2['shares'] == expected_shares
-
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.total_deployed() == 100 + INIT_USER_POOL_BALANCE
@@ -122,9 +118,12 @@ def test_invest_vault_2x(pool, vault, base_asset, admin, me, init_token_balances
     assert vault.totalSupply() >= 100 + INIT_USER_POOL_BALANCE # may have minflation fees
     assert vault.totalAssets() == 100 + INIT_USER_POOL_BALANCE
     assert base_asset.balanceOf(vault) == 100 + INIT_USER_POOL_BALANCE
+    # TODO TEST rounding errors
+    # expected_shares = 
+    # assert invest_event2['shares'] == expected_shares
 
 
-def test_invest_vault_deployed_cant_be_withdrawn_from_pool(pool, vault, base_asset, admin, me, init_token_balances, _deposit):
+def test_invest_vault_deployed_cant_be_withdrawn_from_pool(pool, vault, base_asset, admin, me, init_token_balances):
     assert pool.totalSupply() == INIT_POOL_BALANCE
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.total_deployed() == 0
@@ -137,9 +136,6 @@ def test_invest_vault_deployed_cant_be_withdrawn_from_pool(pool, vault, base_ass
     invest_event = _find_event_by({ 'vault': vault.address, 'assets': INIT_POOL_BALANCE, 'shares': INIT_POOL_BALANCE }, pool_logs)
     deposit_event = _find_event_by({ 'sender': pool.address, 'owner': pool.address, 'shares': INIT_POOL_BALANCE, 'assets': INIT_POOL_BALANCE }, pool_logs)
     deposit_rev_event = _find_event_by({ 'fee_type': 2 , 'payer': vault.address, 'receiver': me, 'amount': INIT_POOL_BALANCE, }, pool_logs)
-
-    # print("investing events pool    :", invest_event, deposit_event, deposit_rev_event)
-
     assert deposit_event is not None
     assert invest_event is not None
     assert deposit_rev_event is not None
@@ -147,13 +143,153 @@ def test_invest_vault_deployed_cant_be_withdrawn_from_pool(pool, vault, base_ass
     assert pool.totalAssets() == INIT_POOL_BALANCE
     assert pool.total_deployed() == INIT_POOL_BALANCE
     assert pool.vault_investments(vault) == INIT_POOL_BALANCE
-
     assert pool.maxFlashLoan(base_asset) == 0
+
     with boa.reverts():
         pool.withdraw(1, me, me, sender=me)
     
 
 # - test divest_vault
+def test_divest_vault_only_owner_if_profitable(pool, vault, base_asset, admin, me, init_token_balances):
+    assert pool.totalSupply() == INIT_POOL_BALANCE
+    assert pool.totalAssets() == INIT_POOL_BALANCE
+    assert pool.total_deployed() == 0
+    assert pool.vault_investments(vault) == 0
+    assert pool.price() == POOL_PRICE_DECIMALS
+
+
+    new_assets = math.floor(INIT_POOL_BALANCE * 10)
+    pool.invest_vault(vault, INIT_POOL_BALANCE, sender=admin)
+    vault.eval(f"self.total_assets = {new_assets}")
+
+    with boa.reverts():
+        # non-owner cant paritally divest vault at profit
+        pool.divest_vault(vault, INIT_POOL_BALANCE, sender=me)
+    with boa.reverts():
+        # non-owner cant fully divest vault at profit
+        pool.divest_vault(vault, 100, sender=me)
+
+    shares_burned = pool.divest_vault(vault, 100, sender=admin)
+
+    pool_logs = pool.get_logs()
+    # print(f"pol divest #1  - ", pool_logs)
+
+    # get events immediatelyafter function call before boa deletes
+    divest_event = _find_event_by({ 'vault': vault.address, 'assets': 100 }, pool_logs)
+    withdraw_event = _find_event_by({ 'receiver': pool.address, 'owner': pool.address, 'assets': 100 }, pool_logs)
+    withdraw_rev_event = _find_event_by({ 'fee_type': 4 , 'payer': pool.address, 'receiver': vault.address, }, pool_logs)
+    collector_rev_event = _find_event_by({ 'fee_type': 32 , 'payer': vault.address, 'receiver': me, }, pool_logs)
+    assert withdraw_event is not None
+    assert divest_event is not None
+    assert withdraw_rev_event is not None
+    assert collector_rev_event is None # owner cant get collector fee
+    assert withdraw_event['shares'] <= 100 # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event['shares'] <= 100 # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event['shares'] == withdraw_event['shares']
+    assert divest_event['shares'] == withdraw_rev_event['amount'] + withdraw_rev_event['revenue']
+
+    assert pool.price() == POOL_PRICE_DECIMALS
+    assert pool.total_deployed() == INIT_POOL_BALANCE - 100
+    # TODO TEST rounding error
+    # assert vault.balanceOf(pool) == INIT_POOL_BALANCE - 100
+    assert base_asset.balanceOf(vault) == INIT_POOL_BALANCE - 100
+
+
+    # net_profit = math.floor(INIT_POOL_BALANCE * 8)
+    recoverable_assets = pool.previewRedeem(math.floor(vault.balanceOf(pool) / 1.1))
+    # print(f"pol divest #2  - ", recoverable_assets, INIT_POOL_BALANCE)
+
+    # these revert checks cause python/boa to throw an EOF error for some reason
+    # TODO its giving weird revert even tho we are just trying to withdraw more assets than we can bc of withdraw fee (can't do 1:1)
+    with boa.reverts():
+        pool.divest_vault(vault, recoverable_assets, sender=me)
+        # non-owner cant paritally divest vault at profit
+    
+    with boa.reverts():
+        pool.divest_vault(vault, 100, sender=me)
+        # non-owner cant fully divest vault at profit
+
+    pool.divest_vault(vault, recoverable_assets, sender=admin)
+    pool_logs2 = pool.get_logs()
+    
+    print(f"pol divest #2  - ", pool_logs2)
+
+    # check share price updates, divest performance fees, tc.
+    divest_event2 = _find_event_by({ 'vault': vault.address, 'assets': recoverable_assets }, pool_logs2)
+    withdraw_event2 = _find_event_by({ 'receiver': pool.address, 'owner': pool.address, 'assets': recoverable_assets }, pool_logs2)
+    perf_rev_event2 = _find_event_by({ 'fee_type': 1, 'payer': vault.address, 'receiver': me, }, pool_logs2)
+    withdraw_rev_event2 = _find_event_by({ 'fee_type': 4, 'payer': pool.address, 'receiver': vault.address, }, pool_logs2)
+    collector_rev_event2 = _find_event_by({ 'fee_type': 32, 'payer': vault.address, 'receiver': me, }, pool_logs2)
+    
+    assert withdraw_event2 is not None
+    assert divest_event2 is not None
+    assert withdraw_rev_event2 is not None
+    assert collector_rev_event2 is None # owner cant get collector fee
+    
+    assert withdraw_event2['shares'] <= recoverable_assets # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event2['shares'] <= recoverable_assets # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event2['shares'] == withdraw_event2['shares']
+    # TODO TEST rounding error
+    # assert divest_event2['shares'] == withdraw_rev_event2['amount'] + withdraw_rev_event['revenue']
+
+    # assert vault.balanceOf(pool) < INIT_POOL_BALANCE - 100 - withdrawing # havent withdrawn everything, leave some in there
+    assert pool.total_deployed() == INIT_POOL_BALANCE - 100 - recoverable_assets
+    assert pool.totalAssets() >= INIT_POOL_BALANCE and pool.totalAssets() <= new_assets # might lose some to fees
+    assert pool.price() >= POOL_PRICE_DECIMALS # new profit offsets mintflation
+
+
+def test_divest_vault_only_owner_if_partial_loss(pool, vault, base_asset, admin, me, init_token_balances):
+    assert pool.totalSupply() == INIT_POOL_BALANCE
+    assert pool.totalAssets() == INIT_POOL_BALANCE
+    assert pool.total_deployed() == 0
+    assert pool.vault_investments(vault) == 0
+    assert pool.price() == POOL_PRICE_DECIMALS
+
+
+    new_assets = math.floor(INIT_POOL_BALANCE * 10)
+    pool.invest_vault(vault, INIT_POOL_BALANCE, sender=admin)
+    vault.eval(f"self.total_assets = {new_assets}")
+
+    recoverable_assets = pool.previewRedeem(math.floor(vault.balanceOf(pool) / 1.1))
+
+    # these revert checks cause python/boa to throw an EOF error for some reason
+    # TODO its giving weird revert even tho we are just trying to withdraw more assets than we can bc of withdraw fee (can't do 1:1)
+    with boa.reverts():
+        pool.divest_vault(vault, recoverable_assets, sender=me)
+        # non-owner cant paritally divest vault at profit
+    
+    with boa.reverts():
+        pool.divest_vault(vault, 100, sender=me)
+        # non-owner cant fully divest vault at profit
+
+    pool.divest_vault(vault, recoverable_assets, sender=admin)
+    pool_logs2 = pool.get_logs()
+    
+    print(f"pol divest #2  - ", pool_logs2)
+
+    # check share price updates, divest performance fees, tc.
+    divest_event2 = _find_event_by({ 'vault': vault.address, 'assets': recoverable_assets }, pool_logs2)
+    withdraw_event2 = _find_event_by({ 'receiver': pool.address, 'owner': pool.address, 'assets': recoverable_assets }, pool_logs2)
+    perf_rev_event2 = _find_event_by({ 'fee_type': 1, 'payer': vault.address, 'receiver': me, }, pool_logs2)
+    withdraw_rev_event2 = _find_event_by({ 'fee_type': 4, 'payer': pool.address, 'receiver': vault.address, }, pool_logs2)
+    collector_rev_event2 = _find_event_by({ 'fee_type': 32, 'payer': vault.address, 'receiver': me, }, pool_logs2)
+    
+    assert withdraw_event2 is not None
+    assert divest_event2 is not None
+    assert withdraw_rev_event2 is not None
+    assert collector_rev_event2 is None # owner cant get collector fee
+    
+    assert withdraw_event2['shares'] <= recoverable_assets # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event2['shares'] <= recoverable_assets # mintflation from first depoist gives us more shares in second deposit
+    assert divest_event2['shares'] == withdraw_event2['shares']
+    # TODO TEST rounding error
+    # assert divest_event2['shares'] == withdraw_rev_event2['amount'] + withdraw_rev_event['revenue']
+
+    assert True
+
+def test_divest_vault_anyone_if_realizing_loss(pool, vault, base_asset, admin, me, init_token_balances):
+    assert True
+
 # burn proper amount of shares for assets (do it 2x),
 # no profit, no profit (do it 2x),
 # no profit, profit (do it 2x),

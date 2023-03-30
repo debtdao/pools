@@ -432,6 +432,7 @@ def invest_vault(_vault: address, _amount: uint256) -> uint256:
 def divest_vault(_vault: address, _amount: uint256) -> bool:
 	"""
 	TODO How to account for vault withdraw fees automatically making is_loss true whenever this is called. Even withcout snitch fee being profitable u could DOS Delegate by constantly reverting
+	would be nice to return how many shares were burned
 	"""
 	is_loss: bool = False
 	net: uint256 = 0
@@ -880,6 +881,9 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 		amount = IERC4626(_vault).previewWithdraw(_amount) # get all assets deposited in vvault
 
 	burned_shares: uint256 = IERC4626(_vault).withdraw(amount, self, self)
+	# can def pull out loss reporting to its own function. mandate that withdraw(amount) is a loss
+	# need to ensure that owner is ownly claiming profitable positions still tho if we remove that logic path
+
 	# assert burned_shares == expected_burn # ensure we are exiting at price we expect
 	# TODO calculate asset/share price slippage even if # shares are expected 
 	# make sure we arent creating the loss ourselves by withdrawing too much at once
@@ -889,6 +893,11 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 	# calculate if we are realizing losses on vault investment
 	# MUST ONLY be true when burning last share with outstanding principal left
 	is_loss = curr_shares == burned_shares and principal > amount
+
+	log named_uint("burned_shares", burned_shares)
+	log named_uint("curr_shares", curr_shares)
+	log named_uint("initial principal", principal)
+	log named_uint("is_loss", convert(is_loss, uint256))
 
 	if is_loss:
 		net = principal - amount
@@ -900,6 +909,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 		net = amount - principal
 		self.total_deployed -= principal
 		self.vault_investments[_vault] = 0
+
 		self._update_shares(net) 			# add to locked_profit
 		self._take_performance_fee(net)		# payout delegate fees on profit
 	else:
@@ -1068,7 +1078,7 @@ def _redeem(
 	# log potential fees for product analytics
 	log RevenueGenerated(_owner, self, withdraw_fee, _shares, convert(FEE_TYPES.WITHDRAW, uint256), self)
 
-	assets_w_fees: uint256 = self._convert_to_assets(_shares) + self._convert_to_shares(withdraw_fee)	
+	assets_w_fees: uint256 = self._convert_to_assets(_shares) - self._convert_to_assets(withdraw_fee)	
 	self._burn_and_withdraw(_shares, assets_w_fees, _owner, _receiver)
 
 	return assets_w_fees
@@ -1638,8 +1648,8 @@ def previewWithdraw(_assets: uint256) -> uint256:
 	return shares + self._convert_to_shares(self._calc_fee(shares, self.fees.withdraw))
 
 
-@external
 @view
+@external
 def previewRedeem(_shares: uint256) -> uint256:
 	"""
 	@return 	assets you would receive for redeeming _shares
@@ -1649,7 +1659,7 @@ def previewRedeem(_shares: uint256) -> uint256:
 	# e.g. if pool.price() < PRICE_DECIMALS: return self._convert_to_assets(max_redeemabl else: return self._convert_to_assets(max_redeemabl
 	# TODO FIX withdraw fees
 	return self._convert_to_assets(_shares) - self._convert_to_assets(self._calc_fee(_shares, self.fees.withdraw))
-	
+
 
 ### Pool view
 
