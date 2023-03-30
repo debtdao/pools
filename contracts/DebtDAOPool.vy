@@ -1252,7 +1252,10 @@ def _calc_locked_profit() -> uint256:
 @internal
 def _max_liquid_assets() -> uint256:
 	"@notice total amount of assets that can be immediately withdrawn from vault"
-	return self.total_assets - self.total_deployed - self._calc_locked_profit()
+	free_assets: uint256 = self.total_assets - self._calc_locked_profit()
+	if self.total_deployed > free_assets: 
+		return 0
+	return free_assets - self.total_deployed
 
 @pure
 @internal
