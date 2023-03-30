@@ -390,9 +390,10 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 		(pool_net_loss, fees_burned) = self._update_shares(position.principal - position.interestRepaid, True)
 		if fees_burned != 0 and msg.sender != self.owner:
 			# snitch was successful. payout mev
-			# TODO pay in asset
 			# TODO move to uopdate_share where we burn fees?
-			self._calc_and_mint_fee(self, msg.sender, fees_burned, SNITCH_FEE, FEE_TYPES.SNITCH)
+			snitch_fee: uint256 = self._calc_fee(fees_burned, SNITCH_FEE)
+			log RevenueGenerated(msg.sender, self, snitch_fee, fees_burned, convert(FEE_TYPES.SNITCH, uint256), ASSET)
+			self._erc20_safe_transfer(ASSET, msg.sender, self._convert_to_assets(snitch_fee))
 
 	# update pool accounting with recovery stats
 
