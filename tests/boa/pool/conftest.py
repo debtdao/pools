@@ -60,6 +60,20 @@ def pool_fee_types():
     ]
 
 @pytest.fixture(scope="module")
+def revenue_types():
+    return [
+        'performance',
+        'mint',
+        'deposit',
+        'redeem',
+        'withdraw',
+        'flash',
+        'collector',
+        'referral',
+        # 'snitch', unique constant fee, we test separately
+    ]
+
+@pytest.fixture(scope="module")
 def pittance_fee_types(pool_fee_types):
     return pool_fee_types[1:] # cut performance and snitch fees of ends
 
@@ -129,7 +143,7 @@ def _repay(mock_line, base_asset, me):
             line.close(sender=payer)
         else:
             line.depositAndRepay(id, amount, sender=payer)
-        
+
     return repay
 
 
@@ -145,9 +159,81 @@ def _collect_interest(pool, mock_line, base_asset, admin, flash_borrower, _add_c
             _repay(line, id, interest_earned)
             pool.collect_interest(line, id, sender=flash_borrower.address)
         return interest_earned, id
-        
+
     return collect_interest
 
+
+@pytest.fixture(scope="module")
+def _gen_rev_events(pool, base_asset, flash_borrower, _deposit, _mint, _collect_interest, me) -> Event | None:
+    def gen_rev_events(revenue_type, amount):
+        """
+        @return - [revenue_type, amount_generated]
+        """
+        # print(f"generate revenue helper type/event  :  {fee_type}")
+        match revenue_type:
+            case 'performance':
+                interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+                # print("performance fee", interest, id)
+                return {
+                    'event': _find_event_by({ "fee_type": 1 }, pool.get_logs()),
+                    'position_id': id,
+                    'interest': interest,
+                }
+            case 'deposit':
+                shares = _deposit(amount, me)
+                # print("deposit fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 2 }, pool.get_logs()),
+                    'shares': shares,
+                }
+            case 'mint':
+                shares = pool.convertToShares(amount, sender=me)
+                # assets = pool.mint(shares, me, sender=me)
+                assets = _mint(amount, me, referrer=None)
+                # print("deposit fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 2 }, pool.get_logs()),
+                    'shares': shares,
+                }
+            case 'withdraw':
+                _deposit(amount, me)
+                shares = pool.withdraw(amount, me, me, sender=me)
+                # print("withdraw fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 4 }, pool.get_logs()),
+                    'shares': shares,
+                }
+            case 'redeem':
+                shares = _deposit(amount, me)
+                assets = pool.redeem(shares, me, me, sender=me)
+                # print("withdraw fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 4 }, pool.get_logs()),
+                    'shares': shares,
+                }
+            case 'flash':
+                pool.flashLoan(flash_borrower, base_asset, amount, "")
+                # print("flash fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 8 }, pool.get_logs()),
+                }
+            case 'collector':
+                interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
+                # print("performancefee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 1 }, pool.get_logs()),
+                    'position_id': id,
+                    'interest': interest,
+                }
+            case 'referral':
+                shares = _deposit(amount, me, flash_borrower) #random referrer
+                # print("referral fee", 0)
+                return {
+                    'event': _find_event_by({ "fee_type": 32 }, pool.get_logs()),
+                    'shares': shares,
+                }
+
+    return gen_rev_events
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +243,6 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
         @return - [fee_type, amount_generated]
         """
         # print(f"generate revenue helper type/event  :  {fee_type}")
-
         match fee_type:
             case 'performance':
                 interest, id = _collect_interest(amount, DRATE, FRATE, INTEREST_TIMESPAN_SEC)
@@ -175,7 +260,7 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
                     'shares': shares,
                 }
             case 'withdraw':
-                _deposit(amount, me) 
+                _deposit(amount, me)
                 shares = pool.withdraw(amount, me, me, sender=me)
                 # print("withdraw fee", 0)
                 return {
@@ -210,7 +295,6 @@ def _gen_rev(pool, base_asset, flash_borrower, _deposit, _collect_interest, me) 
                 }
 
     return gen_rev
-
 
 # @pytest.fixture(scope="session")
 # def line(pool, admin, borrower):

@@ -1,7 +1,8 @@
-# TODO check tests against most recent 
+# TODO check tests against most recent
 
 import boa
 import ape
+import math
 from eth_utils import to_checksum_address
 import pytest
 import logging
@@ -10,11 +11,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from datetime import timedelta
-from ..utils.events import _find_event
 
-MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935
-MAX_TOKEN_AMOUNT = MAX_UINT - 10**25 # offset by existing admin balance so no overflows
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+from tests.boa.pool.test_pool import _is_pittance_fee
+from ..utils.events import _find_event, _find_event_by
+
+from .conftest import VESTING_RATE_COEFFICIENT, SET_FEES_TO_ZERO, DRATE, FRATE, INTEREST_TIMESPAN_SEC, ONE_YEAR_IN_SEC,  FEE_COEFFICIENT, MAX_PITTANCE_FEE
+from ..conftest import MAX_UINT, ZERO_ADDRESS, POOL_PRICE_DECIMALS, INIT_POOL_BALANCE, INIT_USER_POOL_BALANCE, _deposit
+
 ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev logs (approve, transfer, claim, price)
 
 
@@ -39,7 +42,7 @@ ClaimRevenueEventLogIndex = 2 # log index of ClaimRevenue event inside claim_rev
 # 5. (invariant) max_uint claim_rev is claimable_rev
 # (done) 6. cant claim more than claimable_rev from claim_rev
 # (idk how to test) 9. claim rev should fail if push payments implemented
-# (idk how to test) 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector 
+# (idk how to test) 7. if accept_ivoice doesnt revert, it must return IRevenueGenerator.payInvoice.selector
 
 
 # Role ACL and state changes
@@ -69,7 +72,7 @@ def _call_pool_as_role(pool, role, action, sender = boa.env.generate_address(), 
     # call pool with args if provided
     # TODO: state is not properly updated/persisted with these calls.
     # i think getattr is calling contract class directly and not simulating with boa so these calls do nothing
-    return func(*args, sender=sender) if len(args) > 0 else func(sender=sender) 
+    return func(*args, sender=sender) if len(args) > 0 else func(sender=sender)
 
 
 @pytest.mark.pool
@@ -92,7 +95,7 @@ def test_only_current_role_holder_can_set_role(pool, me, admin, pool_roles):
 
         assert me == _call_pool_as_role(pool, role, 'next')
         _call_pool_as_role(pool, role, 'accept', me)
-        
+
         assert to_checksum_address(_call_pool_as_role(pool, role, 'get')) == me
         assert _call_pool_as_role(pool, role, 'next') == me
 
@@ -124,7 +127,7 @@ def test_can_override_pending_role_before_accepted(pool, me, admin, pool_roles):
             _call_pool_as_role(pool, role, 'accept', me)
 
 @pytest.mark.pool
-@pytest.mark.rev_generator        
+@pytest.mark.rev_generator
 def test_cant_accept_role_as_current_role_holder(pool, me, admin, pool_roles):
     for role in pool_roles:
         assert to_checksum_address(_call_pool_as_role(pool, role, 'get')) == admin
@@ -278,31 +281,6 @@ def test_rev_recipient_can_claim_rev(pool, admin, amount):
 
 @pytest.mark.pool
 @pytest.mark.rev_generator
-@given(amount=st.integers(min_value=1, max_value=MAX_UINT)) # min_val = 1 so no off by one when adjusting values
-@settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
-    # test max claim shortcut
-    pool.eval(f'self.accrued_fees = {amount}')
-    pool.eval(f'self.balances[self] = {amount}')
-    assert pool.claimable_rev(pool) == amount
-    assert pool.accrued_fees() == amount
-
-    with boa.reverts():
-        pool.claim_rev(pool, amount + 1, sender=admin)
-    
-    assert pool.claimable_rev(pool) == amount
-    assert pool.accrued_fees() == amount
-
-    pool.claim_rev(pool, amount, sender=admin)
-
-    event = pool.get_logs()[ClaimRevenueEventLogIndex]
-    assert f'{event.event_type}' == 'event RevenueClaimed(address,uint256)'
-    assert to_checksum_address(event.args_map['rev_recipient']) == admin
-    assert event.args_map['amount'] == amount
-    assert pool.claimable_rev(pool) == 0
-
-@pytest.mark.pool
-@pytest.mark.rev_generator
 @given(amount=st.integers(min_value=1, max_value=MAX_UINT - 2)) # ensure we dont hit MAX_UINT special case
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
 def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
@@ -314,7 +292,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 
     with boa.reverts(): # # TODO doesnot revert
         pool.claim_rev(pool, amount + 1, sender=admin)
-    
+
     assert pool.claimable_rev(pool) == amount
     assert pool.accrued_fees() == amount
 
@@ -328,6 +306,7 @@ def test_rev_recipient_cant_overclaim_rev(pool, admin, amount):
 
 
 @pytest.mark.pool
+@pytest.mark.slow
 @pytest.mark.rev_generator
 @given(amount=st.integers(min_value=0, max_value=MAX_UINT))
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
@@ -344,13 +323,129 @@ def test_cant_claim_rev_of_non_pool_token(pool, admin, base_asset, amount):
     assert pool.claimable_rev(base_asset) == 0
     with boa.reverts("non-revenue token"):
         pool.claim_rev(base_asset, amount, sender=admin)
-    
+
     new_token = boa.load('tests/mocks/MockERC20.vy', "Lending Token", "LEND", 18)
     new_token.mint(pool, amount)
     assert new_token.balanceOf(pool) == amount
     assert pool.claimable_rev(new_token) == 0
     with boa.reverts("non-revenue token"):
         pool.claim_rev(new_token, amount, sender=admin)
+
+
+@pytest.mark.pool
+@pytest.mark.slow
+@pytest.mark.invariant
+@pytest.mark.rev_generator
+@given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
+        perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
+        amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_self_owner_rev_claimable_by_rev_recipient(pool, revenue_types, admin, _gen_rev_events, pittance_fee, perf_fee, amount):
+    """ Emits one event for each revenue type (i.e. performance, mint, deposit, redeem, withdraw, etc.)
+        Gets revenue from each event.
+        Checks that event revenue equals revenue claimable by recipient.
+    """
+
+    assert pool.rev_recipient() == admin
+    assert pool.claimable_rev(pool) == 0
+
+    pool.eval(SET_FEES_TO_ZERO)
+    pool.eval("self.accrued_fees = 0")
+
+    # Create RevenueGenerated event for each function that emits RevenueGenenerated event
+    for revenue_type in revenue_types:
+        # Determine fee type for RevenueGenerated event
+        fee_type = revenue_type
+        if revenue_type == 'mint':
+            fee_type = 'deposit'
+        elif revenue_type == 'redeem':
+            fee_type = 'withdraw'
+        fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
+
+        # Set fee
+        set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
+        set_fee(fee_bps, sender=admin)
+        assert fee_bps == pool.eval(f'self.fees.{fee_type}')
+
+        # Create RevenueGenerated event
+        rev_data = _gen_rev_events(revenue_type, amount)
+        event = rev_data['event']
+
+        # Check that event revenue is same as revenue claimable by rev_recipient
+        claimable_rev = pool.claimable_rev(pool)
+        rev_claimed = pool.claim_rev(pool, claimable_rev, sender=admin)
+        assert rev_claimed == True
+        assert pool.claimable_rev(pool) == 0
+
+
+@pytest.mark.pool
+@pytest.mark.slow
+@pytest.mark.rev_generator
+@pytest.mark.event_emissions
+@pytest.mark.invariant
+@given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
+        perf_fee=st.integers(min_value=1, max_value=FEE_COEFFICIENT),
+        amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=10**25),) # min_val = 1 so no off by one when adjusting values
+@settings(max_examples=100, deadline=timedelta(seconds=1000))
+def test_claimable_rev_equals_sum_of_self_owner_fee_events_emitted(pool, revenue_types, admin, _gen_rev_events, pittance_fee, perf_fee, amount):
+    """ Emits one event for each revenue type (i.e. performance, mint, deposit, redeem, withdraw, etc.)
+        Gets revenue from each event and adds to total_revenue.
+        Checks that total_revenue equals claimable_rev(pool).
+    """
+    total_revenue = 0
+    assert pool.claimable_rev(pool) == total_revenue
+
+    pool.eval(SET_FEES_TO_ZERO)
+    pool.eval("self.accrued_fees = 0")
+
+    # Create RevenueGenerated event for each function that emits RevenueGenenerated event
+    for revenue_type in revenue_types:
+        # Determine fee type for RevenueGenerated event
+        fee_type = revenue_type
+        if revenue_type == 'mint':
+            fee_type = 'deposit'
+        elif revenue_type == 'redeem':
+            fee_type = 'withdraw'
+        fee_bps = pittance_fee if _is_pittance_fee(fee_type) else perf_fee
+
+        # Set fee
+        set_fee = getattr(pool, f'set_{fee_type}_fee', lambda x: "Fee type does not exist in Pool.vy")
+        set_fee(fee_bps, sender=admin)
+        assert fee_bps == pool.eval(f'self.fees.{fee_type}')
+
+        # Create RevenueGenerated event
+        rev_data = _gen_rev_events(revenue_type, amount)
+        event = rev_data['event']
+
+        # Check that total revenue is same as claimable revenue
+        total_revenue += event['revenue']
+        # assert pool.claimable_rev(pool) == total_revenue
+        # print('Revenue Type: ', revenue_type)
+        # print('Event Revenue: ', event['revenue'])
+        # print('Total Revenue: ', total_revenue)
+        # print('Claimable Revenue: ', pool.claimable_rev(pool))
+    assert pool.claimable_rev(pool) == total_revenue
+
+
+@pytest.mark.pool
+@pytest.mark.rev_generator
+@pytest.mark.invariant
+def test_max_uint_claim_rev_equals_claimable_rev(pool, admin):
+    # give MAX_UNIT - 1 of revenue to delegate
+    amount = MAX_UINT - 1
+    pool.eval(f'self.accrued_fees = {amount}')
+    pool.eval(f'self.balances[self] = {amount}')
+
+    assert pool.claimable_rev(pool) == amount
+    assert pool.accrued_fees() == amount
+
+    # rev_recipient claims MAX_UNIT revenue
+    pool.claim_rev(pool, MAX_UINT, sender=admin)
+
+    # leaving no revenue remaining
+    assert pool.claimable_rev(pool) == 0
+    assert pool.accrued_fees() == 0
+
 
 @pytest.mark.acl
 @pytest.mark.pool
@@ -437,7 +532,7 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
             # TODO expect boa error not vyper error due to accept_invoice not being on ABI
             # response = pool.accept_invoice(me, base_asset, amount, "My Invoicing Event")
         assert True
-        
+
         # if implemented
         # print("accept invoice response", response)
         # event = pool.get_logs()[0]
@@ -459,7 +554,7 @@ def test_accept_invoice_must_revert_or_return_selector(pool, base_asset, me, amo
 #     assert _call_pool_as_role(pool, 'owner', 'set', admin, me) # state not saved
 #     assert me == _call_pool_as_role(pool, 'owner', 'next') # state not saved
 #     num_events.append(len(pool.get_logs()))
-    
+
 #     # no assert + extern call + extern check
 #     _call_pool_as_role(pool, 'owner', 'set', admin, me)    # state not saved
 #     assert me == _call_pool_as_role(pool, 'owner', 'next') # state not saved

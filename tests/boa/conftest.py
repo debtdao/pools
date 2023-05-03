@@ -59,11 +59,22 @@ def _deposit(pool, base_asset):
         base_asset.mint(receiver, amount)
         base_asset.approve(pool, amount, sender=receiver)
         if referrer:
-            pool.depositWithReferral(amount, receiver, referrer, sender=receiver)
+            return pool.depositWithReferral(amount, receiver, referrer, sender=receiver)
         else:
-            pool.deposit(amount, receiver, sender=receiver)
+            return pool.deposit(amount, receiver, sender=receiver)
     return deposit
 
+@pytest.fixture(scope="module")
+def _mint(pool, base_asset):
+    def mint(amount, receiver, referrer=None):
+        base_asset.mint(receiver, amount)
+        base_asset.approve(pool, amount, sender=receiver)
+        shares = pool.convertToShares(amount, sender=receiver)
+        if referrer:
+            return pool.mintWithReferral(amount, receiver, referrer, sender=receiver)
+        else:
+            return pool.mint(shares, receiver, sender=receiver)
+    return mint
 
 @pytest.fixture(scope="module")
 def init_token_balances(base_asset, pool, admin, me):
@@ -77,7 +88,7 @@ def init_token_balances(base_asset, pool, admin, me):
     base_asset.mint(me, INIT_USER_POOL_BALANCE, sender=me)
     base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=me)
     shares = pool.deposit(INIT_USER_POOL_BALANCE, me, sender=me)
-        
+
     base_asset.mint(admin, INIT_USER_POOL_BALANCE, sender=admin)
     base_asset.approve(pool, INIT_USER_POOL_BALANCE, sender=admin)
     shares2 = pool.deposit(INIT_USER_POOL_BALANCE, admin, sender=admin)

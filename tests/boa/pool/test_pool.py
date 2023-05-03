@@ -26,16 +26,16 @@ ZERO_BYTES32 = "0x00000000000000000000000000000000000000000000000000000000000000
 # 4626 Vault Invest/Divest
 
 # (done) owner priviliges on investment functions
-# vault_investment goes up by _amount 
+# vault_investment goes up by _amount
 # only vault that gets deposited into has vault_investment changed
 # emits InvestVault event X params
 # emits RevenueGenereated event with X params and FEE_TYPES.DEPOSIT
 # investing in vault increased total_deployed by _amount
 # investing in vault increases vault.balanceOf(pool) by shares returned in vault.deposit
 # investing in vault increases vault.balanceOf(pool) by expected shares using _amount and pre-deposit share price
-# 
+#
 # divesting vault decreases total_deployed
-# divesting vault 
+# divesting vault
 # emits DivestVault event with X params
 # emits RevenueGenereated event with X params and FEE_TYPES.WITHDRAW
 # divesting vault decreases vault.balanceOf(pool)
@@ -109,7 +109,7 @@ def test_depositing_in_pool_increases_total_assets(pool, admin, me, base_asset, 
     pool.mint(100, me, sender=me)
     assert base_asset.balanceOf(pool) == 200 + init_token_balances * 2
     assert pool.totalAssets() == 200 + init_token_balances * 2
-    
+
 
 @pytest.mark.pool
 def test_withdrawing_from_pool_decreases_total_assets(pool, admin, me, base_asset, init_token_balances):
@@ -119,7 +119,7 @@ def test_withdrawing_from_pool_decreases_total_assets(pool, admin, me, base_asse
     pool.withdraw(100, me, me, sender=me)
     assert base_asset.balanceOf(pool) == init_token_balances * 2 - 100
     assert pool.totalAssets() == init_token_balances * 2 - 100
-    
+
     base_asset.mint(me, 100)
     base_asset.approve(pool, 100, sender=me)
     pool.redeem(100, me, me, sender=me)
@@ -140,7 +140,7 @@ def test_depositing_in_pool_increases_total_supply(pool, admin, me, base_asset, 
     base_asset.approve(pool, 100, sender=me)
     pool.mint(100, me, sender=me)
     assert pool.total_supply() == 200 + init_token_balances * 2
-    
+
 
 @pytest.mark.pool
 def test_withdrawing_from_pool_decreases_total_supply(pool, admin, me, base_asset, init_token_balances):
@@ -148,12 +148,12 @@ def test_withdrawing_from_pool_decreases_total_supply(pool, admin, me, base_asse
 
     pool.withdraw(100, me, me, sender=me)
     assert pool.total_supply() == init_token_balances * 2 - 100
-    
+
     base_asset.mint(me, 100)
     base_asset.approve(pool, 100, sender=me)
     pool.redeem(100, me, me, sender=me)
     assert pool.total_supply() == init_token_balances * 2 - 200
-    
+
 
 ############################################
 ########                            ########
@@ -170,7 +170,7 @@ def test_only_owner_can_set_max_asset(pool, admin, me):
     assert pool.max_assets() == 0
     pool.set_max_assets(MAX_UINT, sender=admin)
     assert pool.max_assets() == MAX_UINT
-    
+
     # pool depositor cant set limit
     with boa.reverts():
         pool.set_max_assets(MAX_UINT, sender=me)
@@ -187,7 +187,7 @@ def test_only_owner_can_set_max_asset(pool, admin, me):
         pool.set_max_assets(0, sender=rando)
     with boa.reverts():
         pool.set_max_assets(10*10**18, sender=rando)
-        
+
 @pytest.mark.pool
 @pytest.mark.pool_owner
 @given(amount=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=INIT_USER_POOL_BALANCE),) # min_val = 1 so no off by one when adjusting values
@@ -197,7 +197,7 @@ def test_fuzz_set_max_assets_amount(pool, base_asset, admin, me, amount, init_to
     pool.set_max_assets(amount, sender=admin)
     assert pool.max_assets() == amount
 
-    current_assets = pool.totalAssets() 
+    current_assets = pool.totalAssets()
     assert current_assets == init_token_balances * 2 # ensure clean state
     base_asset.mint(me, amount + 1, sender=me) # do + 1 to test max overflow
     base_asset.approve(pool, amount + 1, sender=me)
@@ -226,13 +226,13 @@ def test_set_min_deposit_only_owner(pool, admin, me):
     assert pool.min_deposit() == 1
     pool.set_min_deposit(MAX_UINT, sender=admin)
     assert pool.min_deposit() == MAX_UINT
-    
+
     pool.set_min_deposit(100, sender=admin)
     assert pool.min_deposit() == 100
-    
+
     pool.set_min_deposit(10*10**18, sender=admin)
     assert pool.min_deposit() == 10*10**18
-    
+
     # pool depositor cant set limit
     with boa.reverts():
         pool.set_min_deposit(MAX_UINT, sender=me)
@@ -249,7 +249,7 @@ def test_set_min_deposit_only_owner(pool, admin, me):
         pool.set_min_deposit(0, sender=rando)
     with boa.reverts():
         pool.set_min_deposit(10*10**18, sender=rando)
-        
+
 
 @pytest.mark.pool
 @pytest.mark.pool_owner
@@ -284,7 +284,7 @@ def test_only_owner_can_set_vesting_rate(pool, admin, me):
     assert pool.vesting_rate() == 0
     pool.set_vesting_rate(VESTING_RATE_COEFFICIENT - 10**10, sender=admin)
     assert pool.vesting_rate() == VESTING_RATE_COEFFICIENT - 10**10
-    
+
     # pool depositor cant set limit
     with boa.reverts():
         pool.set_vesting_rate(VESTING_RATE_COEFFICIENT, sender=me)
@@ -301,7 +301,7 @@ def test_only_owner_can_set_vesting_rate(pool, admin, me):
         pool.set_vesting_rate(0, sender=rando)
     with boa.reverts():
         pool.set_vesting_rate(VESTING_RATE_COEFFICIENT - 10**10, sender=rando)
-        
+
 
 @pytest.mark.pool
 @pytest.mark.pool_owner
@@ -316,7 +316,7 @@ def test_fuzz_set_vesting_rate_amount(pool, base_asset, admin, me, amount):
     else:
         pool.set_vesting_rate(amount, sender=admin)
         assert pool.vesting_rate() == amount
-    
+
     # profit lock tests have their own section below in this file
 
 ############################################%#
@@ -350,7 +350,7 @@ def test_revenue_calculations_based_on_fees_state(
         rev_data = _gen_rev(fee_type, amount)
 
         pittance_fee_rev = math.floor((amount * fee_bps) / FEE_COEFFICIENT)
-        
+
         # TODO TEST figure out why pool returns inconsistent events btw calls. probably boa thing
         # assert rev_data['event'] is not None
         # TODO TEST THIS BLOCK NEVER GETS HIT
@@ -404,12 +404,12 @@ def test_revenue_calculations_based_on_fees_state(
                 assert event['revenue'] == pittance_fee_rev
                 assert to_checksum_address(event['payer']) == pool.address
                 assert to_checksum_address(event['receiver']) == flash_borrower.address # random referrer for testing
-                
+
                 if amount > INTEREST_TIMESPAN_SEC:
                     assert False
             # TODO TEST other fee types
 
-        
+
 @pytest.mark.pool
 @pytest.mark.rev_generator
 @given(pittance_fee=st.integers(min_value=1, max_value=MAX_PITTANCE_FEE),
@@ -488,13 +488,13 @@ def test_pittance_fees_emit_revenue_generated_event(
         set_fee = getattr(pool, f'set_{fee_name}_fee', lambda x: "Fee type does not exist in Pool.vy")
 
         expected_rev = math.floor(((amount * pittance_fee) / FEE_COEFFICIENT))
-        
+
         set_fee(pittance_fee, sender=admin) # set fee so we generate revenue
 
         # TODO dynamic fee generating HuF
         _deposit(amount, me)
 
-        
+
         # test deposit event before other pool state
         events = pool.get_logs()
 
@@ -635,12 +635,12 @@ def _is_pittance_fee(fee_name: str) -> bool:
 @given(deployed=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=INIT_POOL_BALANCE),
         locked=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=INIT_POOL_BALANCE),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset, deployed, locked):    
+def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset, deployed, locked):
     def test_invariant():
         total = pool.totalAssets()
         deployed = pool.total_deployed()
         locked = pool.locked_profits()
-    
+
         liquid = total - deployed - locked
 
         # TODO TEST should this be its own "test_invariant_liquid_assets_are"
@@ -662,15 +662,15 @@ def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset
     pool.eval(f"self.total_assets += {deployed}")
     test_invariant()
     # add locked profit, should increase total_assetes to not fuckup accounting for whatever reason
-    pool.eval(f"self.total_assets = {locked}")    
-    pool.eval(f"self.locked_profits = {locked}")    
+    pool.eval(f"self.total_assets = {locked}")
+    pool.eval(f"self.locked_profits = {locked}")
     test_invariant()
     # moar liquid funds
     pool.eval(f"self.total_deployed = {0}")
     test_invariant()
     # drain the pool entirely
-    pool.eval(f"self.total_assets = {0}")    
-    pool.eval(f"self.locked_profits = {0}")    
+    pool.eval(f"self.total_assets = {0}")
+    pool.eval(f"self.locked_profits = {0}")
     test_invariant()
 
 
@@ -680,16 +680,16 @@ def test_invariant_max_liquid_is_total_less_deployed_and_locked(pool, base_asset
 @given(deployed=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=INIT_POOL_BALANCE),
         locked=st.integers(min_value=POOL_PRICE_DECIMALS, max_value=INIT_POOL_BALANCE),)
 @settings(max_examples=100, deadline=timedelta(seconds=1000))
-def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, locked):    
+def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, locked):
     def test_invariant():
         total = pool.totalAssets()
         deployed = pool.total_deployed()
         locked = pool.locked_profits()
-    
+
         liquid = total - deployed - locked
 
         assert pool.maxFlashLoan(base_asset) == liquid
-    
+
     # initial test
     test_invariant()
     total = pool.totalAssets()
@@ -701,15 +701,15 @@ def test_invariant_max_flash_loan_is_max_liquid(pool, base_asset, deployed, lock
     pool.eval(f"self.total_assets += {deployed}")
     test_invariant()
     # add locked profit, should increase total_assetes to not fuckup accounting for whatever reason
-    pool.eval(f"self.total_assets = {locked}")    
-    pool.eval(f"self.locked_profits = {locked}")    
+    pool.eval(f"self.total_assets = {locked}")
+    pool.eval(f"self.locked_profits = {locked}")
     test_invariant()
     # moar liquid funds
     pool.eval(f"self.total_deployed = {0}")
     test_invariant()
     # drain the pool entirely
-    pool.eval(f"self.total_assets = {0}")    
-    pool.eval(f"self.locked_profits = {0}")    
+    pool.eval(f"self.total_assets = {0}")
+    pool.eval(f"self.locked_profits = {0}")
     test_invariant()
 
 @pytest.mark.slow
@@ -786,12 +786,12 @@ def test_invariant_preview_incorporates_fees_into_share_price(pool, base_asset, 
     # same assets bc fee is taken in minflation post deposit/mint
     assert mintable_w_fee == expected_mintable
     assert depositable_w_fee == expected_depositable
-    
+
     if assets > 0:
         pool.eval(f"self.total_deployed = {assets - 1}")
         redeemable = pool.previewRedeem(shares)
         withdrawable = pool.previewWithdraw(assets)
-        
+
         assert redeemable == 1
         assert withdrawable == 0
 
