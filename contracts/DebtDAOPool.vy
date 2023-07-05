@@ -345,13 +345,13 @@ def abort(_line: address, _id: bytes32) -> (uint256, uint256):
 
 @external
 @nonreentrant("lock")
-def reduce_credit(_line: address, _id: bytes32, amount: uint256) -> (uint256, uint256):
+def reduce_credit(_line: address, _id: bytes32, _withdraw_amount: uint256) -> (uint256, uint256):
 	assert msg.sender == self.owner, "not owner"
-	return self._reduce_credit(_line, _id, amount)
+	return self._reduce_credit(_line, _id, _withdraw_amount)
 
 @external
 @nonreentrant("lock")
-def use_and_repay(_line: address, repay: uint256, withdraw: uint256) -> (uint256, uint256):
+def use_and_repay(_line: address, _repay_amount: uint256, _withdraw_amount: uint256) -> (uint256, uint256):
 	assert msg.sender == self.owner, "not owner"
 
 	# Assume we are next lender in queue. 
@@ -359,9 +359,9 @@ def use_and_repay(_line: address, repay: uint256, withdraw: uint256) -> (uint256
 	id: bytes32 = ISecuredLine(_line).ids(0)
 
 	# NOTE: no need to log, Line emits events already
-	assert ISecuredLine(_line).useAndRepay(repay)
+	assert ISecuredLine(_line).useAndRepay(_repay_amount)
 
-	return self._reduce_credit(_line, id, withdraw)
+	return self._reduce_credit(_line, id, _withdraw_amount)
 
 @external
 @nonreentrant("lock")
@@ -372,10 +372,10 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 	@param _line - _line of credit contract to call
 	@param _id   - credit position on _line controlled by this pool 
 	"""
-	assert ISecuredLine(_line).status() == STATUS_INSOLVENT
 	# check we haven't already realized loss on this position.
 	# prevent replay attacks to drain owners accrued fees or fuck up pool math
-	assert self.impairments[_line] == 0 # TODO TEST line cant be un-sonsolved  so no replay chance. Do we need reundant check in pool too?
+	assert self.impairments[_line] == 0 # TODO TEST line cant be un-insolved  so no replay chance. Do we need reundant check in pool too?
+	assert ISecuredLine(_line).status() == STATUS_INSOLVENT
 
 	position: Position = ISecuredLine(_line).credits(_id)
 	# validate line is ours and has a loss to realize
@@ -651,10 +651,10 @@ def stake_assets(_assets: uint256) -> uint256:
 	@notice
 		Stake assets to pool as first loss protection for depositors.
 		Convert to shares to earn profits from investments
-	@note 
+	@dev 
 		Anyone can stake assets
 	@param _assets The amount of assets to stake.
-	@returns shares_staked - amount of shares minted for staking
+	@return shares_staked - amount of shares minted for staking
 	"""
 	assert _assets != 0, "zero assets"
 	shares_staked: uint256 = self._deposit(_assets, self._convert_to_shares(_assets), self)
@@ -672,7 +672,7 @@ def initiate_unstake(_shares: uint256) -> uint256:
 		Each unstake process is identified by the block that its timelock ends at
 	@dev we use shares instead of assets in case share price changes between initiation and unstaking
 	@param _shares The amount of pool shares to return to delegate.
-	@returns
+	@return
 		Block that owner can claim unstaked s hares
 	"""
 	assert _shares != 0 # dev: zero value
@@ -944,7 +944,7 @@ def _divest_vault(_vault: address, _amount: uint256) -> (bool, uint256):
 
 		Good dynamic where Lines have higher yield to fill accrued_fees but lower liquidity / capacity (high risk, high reward) so Delegate overflows to 4626 investments.
 		4626 is more liquid, goes straight to users w/o fees, and has better snitch protections (low risk, low reward).
-	@returns
+	@return
 		bool - if we realized profit or not
 		uint256 - profit withdrawn (in assets)
 	@dev
@@ -1088,7 +1088,7 @@ def _deposit(
 	"""
 	@notice 	- adds shares to a user after depositing into vault
 	@dev 		- priviliged internal func
-	@returns 	- amount of shares received for _assets
+	@return 	- amount of shares received for _assets
 	"""
 	assert _shares > 0 # cant deposit assets without receiving shares back. Also prevents share price attacks
 	assert _assets >= self.min_deposit
