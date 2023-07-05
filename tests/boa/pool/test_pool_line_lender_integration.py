@@ -1,5 +1,4 @@
 import boa
-import ape
 import math
 import pytest
 from boa.vyper.contract import BoaError, VyperContract

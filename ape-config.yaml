@@ -13,7 +13,7 @@ ethereum:
   default_network: local
   local:
     default_provider: foundry
-    uri: http://localhost:8545 # anvil mainnet fork
+    # uri: http://localhost:8545 # anvil mainnet fork
   mainnet_fork:
     default_provider: foundry
     # default_provider: hardhat
@@ -22,8 +22,4 @@ ethereum:
     transaction_acceptance_timeout: 99999999
 
 foundry:
-  # default_network: test
-  local:
-    uri: http://localhost:8545 # anvil mainnet fork
-  test:
-      uri: http://localhost:8545 # anvil mainnet fork
+  port: 8555

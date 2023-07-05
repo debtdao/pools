@@ -1,4 +1,3 @@
-import ape
 import boa
 import math
 import pytest

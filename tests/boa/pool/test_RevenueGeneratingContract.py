@@ -1,7 +1,6 @@
 # TODO check tests against most recent 
 
 import boa
-import ape
 from eth_utils import to_checksum_address
 import pytest
 import logging

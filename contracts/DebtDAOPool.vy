@@ -1,4 +1,4 @@
-# @version ^0.3.7
+# @version ^0.3.9
 
 """
 @title 	Debt DAO Lending Pool
@@ -60,6 +60,10 @@ interface IDebtDAOPool:
 	def set_min_deposit(new_min: uint256) -> bool: nonpayable
 	def set_vesting_rate(vesting_rate: uint256): nonpayable
 
+	def stake_assets(_assets: uint256) -> uint256: nonpayable
+	def initiate_unstake(_shares: uint256) -> uint256: nonpayable
+	def unstake_shares(_index: uint256, _receiver: address): nonpayable
+
 	# fees
 	def set_performance_fee(fee: uint16) -> bool: nonpayable
 	def set_collector_fee(fee: uint16) -> bool: nonpayable
@@ -83,6 +87,8 @@ FEE_COEFFICIENT: public(constant(uint256)) = 10000
 SNITCH_FEE: public(constant(uint16)) = 500
 # @notice 5% in bps. Max fee that can be charged for non-performance fee
 MAX_PITTANCE_FEE: public(constant(uint16)) = 200
+# @notice How long delegate has to wait to claim stake after initiating withdrawal. 7 days in seconds
+UNSTAKE_TIMELOCK: public(constant(uint256)) = 60*60*24 * 7 # 7 days
 
 # rate per block of profit degradation. VESTING_RATE_COEFFICIENT is 100% per block
 VESTING_RATE_COEFFICIENT: public(constant(uint256)) = 10 ** 18
@@ -108,8 +114,8 @@ STATUS_INSOLVENT: constant(uint8) = 4
 NAME: immutable(String[50])
 SYMBOL: immutable(String[18])
 DECIMALS: immutable(uint8)
-# 10**DECIMALS. Decimals to add to share price to prevent rounding errors
-PRICE_DECIMALS: public(immutable(uint256))
+# 10**8. Decimals to add to share price to prevent rounding errors
+PRICE_DECIMALS: public(constant(uint256)) = 10**8
 # total amount of shares in pool
 total_supply: public(uint256)
 # balance of pool vault shares
@@ -153,6 +159,11 @@ rev_recipient: public(address)
 pending_rev_recipient: public(address)
 # shares earned by Delegate for managing pool
 accrued_fees: public(uint256)
+# shares deposited by delegaet as collateral to manage pool
+delegate_stake: public(uint256)
+# delegate stake withdrawals with timelock. block timestamp -> amount
+unstake_queue: public(HashMap[uint256, uint256])
+
 # minimum amount of assets that can be deposited at once. whales only, fuck plebs.
 min_deposit: public(uint256)
 # maximum amount of asset deposits to allow into pool
@@ -238,12 +249,11 @@ def __init__(
 
 	# IERC20 vars
 	NAME = self._get_pool_name(_name)
-	SYMBOL = self._get_pool_symbol(_asset, _symbol)
+	SYMBOL = _symbol
 	# MUST use same decimals as `asset` token. revert if call fails
 	# We do not account for different base/vault token decimals in our math
 	DECIMALS = IERC20Detailed(_asset).decimals()
 	assert DECIMALS != 0, "bad decimals" # 0 could be non-standard `False` or revert
-	PRICE_DECIMALS = 10**convert(DECIMALS, uint256)
 
 	# IERC4626
 	ASSET = _asset
@@ -363,7 +373,7 @@ def impair(_line: address, _id: bytes32) -> (uint256, uint256):
 	@param _id   - credit position on _line controlled by this pool 
 	"""
 	assert ISecuredLine(_line).status() == STATUS_INSOLVENT
-	# check we haven't already realized losson this position.
+	# check we haven't already realized loss on this position.
 	# prevent replay attacks to drain owners accrued fees or fuck up pool math
 	assert self.impairments[_line] == 0 # TODO TEST line cant be un-sonsolved  so no replay chance. Do we need reundant check in pool too?
 
@@ -472,7 +482,7 @@ def sweep(_token: address, _amount: uint256 = max_value(uint256)):
 		value = IERC20(ASSET).balanceOf(self) - (self.total_assets - self.total_deployed)
 	elif _token == self:
 		# recover shares sent directly to pool, minus fees held for owner.
-		value = self.balances[self] - self.accrued_fees
+		value = self.balances[self] - self.accrued_fees - self.delegate_stake
 	elif _amount == max_value(uint256):
 		value = IERC20(_token).balanceOf(self)
 
@@ -633,14 +643,83 @@ def set_vesting_rate(_vesting_rate: uint256):
 	self.vesting_rate = _vesting_rate
 	log UpdateProfitVestingRate(_vesting_rate) 
 
+
+@external
+@nonreentrant("lock")
+def stake_assets(_assets: uint256) -> uint256: 
+	"""
+	@notice
+		Stake assets to pool as first loss protection for depositors.
+		Convert to shares to earn profits from investments
+	@note 
+		Anyone can stake assets
+	@param _assets The amount of assets to stake.
+	@returns shares_staked - amount of shares minted for staking
+	"""
+	assert _assets != 0, "zero assets"
+	shares_staked: uint256 = self._deposit(_assets, self._convert_to_shares(_assets), self)
+	self.delegate_stake += shares_staked
+	log StakeAssets(msg.sender, _assets, shares_staked)
+	return shares_staked
+
+
+@external
+@nonreentrant("lock")
+def initiate_unstake(_shares: uint256) -> uint256:
+	"""
+	@notice
+		Starts qithdrawal process for delegate to Remove shares from first loss pool
+		Each unstake process is identified by the block that its timelock ends at
+	@dev we use shares instead of assets in case share price changes between initiation and unstaking
+	@param _shares The amount of pool shares to return to delegate.
+	@returns
+		Block that owner can claim unstaked s hares
+	"""
+	assert _shares != 0 # dev: zero value
+	assert msg.sender == self.owner  # dev: not pool owner
+	assert self.delegate_stake >= _shares # dev: not enough shares to unstake
+	
+	unlock_index: uint256 = block.timestamp + UNSTAKE_TIMELOCK
+	self.unstake_queue[unlock_index] = _shares
+
+	log InitiateUnstake(unlock_index, _shares)
+	return unlock_index
+
+@external
+@nonreentrant("lock")
+def unstake_shares(_index: uint256, _receiver: address):
+	"""
+	@notice
+		Removes shares from first loss pool of delegate stake 
+	@param _index The block timestamp that unstake can be withdrawn at
+	@param _receiver The address to send unstaked shares to
+	"""
+	assert _index < block.timestamp # dev: queue not ready
+	assert msg.sender == self.owner  # dev: not pool owner
+
+	shares_unstaked: uint256 = self.unstake_queue[_index]
+	assert shares_unstaked != 0 # dev: index not in unstake queue
+	# ensure stake hasnt been slashed since initiating unstake
+	assert self.delegate_stake >= shares_unstaked # dev: not enough shares to unstake
+	
+	self.unstake_queue[_index] = 0
+	self.delegate_stake -= shares_unstaked
+
+	self._transfer(self, _receiver, shares_unstaked)
+	
+	log UnstakeShares(_index, shares_unstaked)
+
+
+
 ### ERC4626 Functions
 @external
 @nonreentrant("lock")
 def deposit(_assets: uint256, _receiver: address) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return - shares caller received for depositing `_assets` tokens
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	return self._deposit(_assets, self._convert_to_shares(_assets), _receiver)
 
@@ -648,9 +727,10 @@ def deposit(_assets: uint256, _receiver: address) -> uint256:
 @nonreentrant("lock")
 def depositWithReferral(_assets: uint256, _receiver: address, _referrer: address) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return - shares caller received for depositing `_assets` tokens
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	return self._deposit(_assets, self._convert_to_shares(_assets), _receiver, _referrer)
 
@@ -658,9 +738,10 @@ def depositWithReferral(_assets: uint256, _receiver: address, _referrer: address
 @nonreentrant("lock")
 def mint(_shares: uint256, _receiver: address) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return assets - amount of assets caller deposited to receive exactly `_shares` shares back
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	# save original share price bc price potentially changes after minflation fees
 	# so `assets` return value is what user actually paid
@@ -672,9 +753,10 @@ def mint(_shares: uint256, _receiver: address) -> uint256:
 @nonreentrant("lock")
 def mintWithReferral(_shares: uint256, _receiver: address, _referrer: address) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return assets - amount of assets caller deposited to receive exactly `_shares` shares back
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	# save original share price bc price potentially changes after minflation fees
 	# so `assets` return value is what user actually paid
@@ -690,9 +772,10 @@ def withdraw(
 	_owner: address
 ) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return - shares
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	return self._withdraw(_assets, _owner, _receiver)
 
@@ -700,9 +783,10 @@ def withdraw(
 @nonreentrant("lock")
 def redeem(_shares: uint256, _receiver: address, _owner: address) -> uint256:
 	"""
+		@dev
+			update share price before taking action to prevent stale virtual price being exploited
 		@return - assets
 	"""
-	# update share price before taking action to prevent stale virtual price being exploited
 	self._unlock_profits()
 	return self._redeem(_shares, _owner, _receiver)
 
@@ -1043,12 +1127,12 @@ def _withdraw(
 	_receiver: address
 ) -> uint256:
 	"""
-	@dev - priviliged internal function. Should run price updates before calculating _assets/_shares params
-
+	@dev - priviliged internal function. Run price updates before calculating _assets/_shares params
 	"""
 	
 	assert _receiver != empty(address)
 	assert _assets <= self._max_liquid_assets() 	# dev: insufficient liquidity
+	assert self.total_assets - _assets >= self.min_deposit # dev: Pool min reached
 
 	# mintflation fees adversly affects pool but not withdrawer who should be the one penalized.
 	# make them burn extra _shares instead of inflating total supply.
@@ -1122,26 +1206,31 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 	# if impair:
 
 	# If available, take performance fee from delegate to offset impairment and protect depositors
-	fees_to_burn: uint256 = self.accrued_fees
-
+	stake_to_burn: uint256 = self.delegate_stake + self.accrued_fees
 	total_to_burn: uint256 = self._convert_to_shares(_assets)
+
 	# cap fees burned to actual amount being burned
-	if fees_to_burn > total_to_burn:
-		fees_to_burn = total_to_burn
-	# NOTE: set after updating fees_to_burn
-	fee_assets: uint256 = self._convert_to_assets(fees_to_burn)
+	if stake_to_burn > total_to_burn:
+		stake_to_burn = total_to_burn
+	# NOTE: set after updating stake_to_burn
+	burned_assets: uint256 = self._convert_to_assets(stake_to_burn)
 
 	# Realize notional pool loss. Reduce share price.
 	# NOTE: must reduce AFTER converting amounts to burn from owner/pool
 	self.total_assets -= _assets
 
 	# burn owner fees to cover losses
-	self.accrued_fees -= fees_to_burn
-	self._burn(self, fees_to_burn)
-	pool_assets_lost: uint256 = _assets - fee_assets
+	if stake_to_burn > self.accrued_fees:
+		self.accrued_fees = 0
+		self.delegate_stake -= stake_to_burn - self.accrued_fees
+	else:
+		self.accrued_fees -= stake_to_burn
 
-	log named_uint("fees_shares_burn", fees_to_burn)
-	log named_uint("fee_assets_burned", fee_assets)
+	self._burn(self, stake_to_burn)
+	pool_assets_lost: uint256 = _assets - burned_assets
+
+	log named_uint("fees_shares_burn", stake_to_burn)
+	log named_uint("fee_assets_burned", burned_assets)
 	log named_uint("total_to_burn", total_to_burn)
 	log named_uint("pool_assets_lost", pool_assets_lost)
 
@@ -1157,7 +1246,7 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 			# profit
 			self.locked_profits = 0
 
-	return (pool_assets_lost, fees_to_burn)
+	return (pool_assets_lost, stake_to_burn)
 	
 	# log price change after updates
 	# TODO check that no calling functions also emit 
@@ -1265,36 +1354,6 @@ def _get_pool_name(_name: String[34]) -> String[50]:
 
 @pure
 @internal
-def _get_pool_symbol(_asset: address, _symbol: String[9]) -> String[18]:
-	"""
-	TODO doesnt work. cant get symbol from _asset
-
-	@dev 		 		if we dont directly copy the `asset`'s decimals then we need to do decimal conversions everytime we calculate share price
-	@param _symbol	 	custom symbol input by pool creator
-	@return 			e.g. ddpDAI-LLAMA, ddpWETH-KARPATKEY
-	"""
-	sym: String[3] = ""
-
-	success: bool = False
-	_sym: Bytes[18] = b""
-	success, _sym = raw_call(
-		_asset,
-		method_id("symbol()"),
-		max_outsize=18,
-		is_static_call=True,
-		revert_on_failure=False
-	)
-
-	if success and len(_sym) != 0:
-		sym = convert(slice(_sym, 0, 3), String[3])
-	# else:
-		# sym = slice(IERC20Detailed(asset).symbol(), 0, 6)
-
-	return concat("ddp", sym, _symbol)
-
-
-@pure
-@internal
 def _get_pool_decimals(_token: address) -> uint8:
 	"""	
 	@notice
@@ -1302,16 +1361,12 @@ def _get_pool_decimals(_token: address) -> uint8:
 	@param _token
 		Pool's asset to mimic decimals for pool's token
 	"""
-	success: bool = False
-	asset_decimals: Bytes[8] = b""
-	success, asset_decimals = raw_call(
+	asset_decimals: Bytes[32] = b""
+	asset_decimals = raw_call(
 		_token,
 		method_id("decimals()"),
-		max_outsize=8, is_static_call=True, revert_on_failure=False
+		max_outsize=32, is_static_call=True, revert_on_failure=True
 	)
-
-	if not success:
-		raise "no asset decimals"
 
 	return convert(asset_decimals, uint8)
 
@@ -1993,6 +2048,18 @@ event Sweep:
 event UpdateProfitVestingRate:
 	degredation: uint256
 
+event StakeAssets:
+	staker: address
+	assets: uint256
+	shares: uint256
+
+event InitiateUnstake:
+	unlock_block: uint256 
+	shares: uint256
+
+event UnstakeShares:
+	unlock_block: uint256 
+	shares: uint256
 
 # Testing events
 event named_uint:
