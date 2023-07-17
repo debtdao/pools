@@ -623,7 +623,7 @@ def claim_rev(_token: address, _amount: uint256) -> bool:
 	self._transfer(self, msg.sender, claimed)
 
 	log RevenueClaimed(self.rev_recipient, claimed)
-	# log price for product analytics
+	# log price
 	price: uint256 = self._virtual_price()
 	# log TrackSharePrice(price, price, self._virtual_apr())
 
@@ -1127,22 +1127,17 @@ def _withdraw(
 	_receiver: address
 ) -> uint256:
 	"""
-	@dev - priviliged internal function. Run price updates before calculating _assets/_shares params
+	@dev - priviliged internal function. Run price updates before calling to prevent stale virtual price being exploited.
 	"""
-	
-	assert _receiver != empty(address)
-	assert _assets <= self._max_liquid_assets() 	# dev: insufficient liquidity
-	assert self.total_assets - _assets >= self.min_deposit # dev: Pool min reached
+	# checks in _burn_and_withdraw
 
 	# mintflation fees adversly affects pool but not withdrawer who should be the one penalized.
-	# make them burn extra _shares instead of inflating total supply.
-	# use _calc not _mint_and_calc + manually log revenue
+	# make them burn extra _shares instead and keep assets constant.
 	shares: uint256 = self._convert_to_shares(_assets)
 	withdraw_fee: uint256 = self._calc_fee(shares, self.fees.withdraw)
-	# log potential fees for product analytics
 	log RevenueGenerated(_owner, self, withdraw_fee, shares, convert(FEE_TYPES.WITHDRAW, uint256), self)
 
-	#  TODO have _asset/_shares == 0 if withdraw/redeem and then dynamically calc withdraw fee in assets or shares
+	# take additional shares from withdrawer as fee to
 	burned_shares: uint256 = shares + withdraw_fee
 	self._burn_and_withdraw(burned_shares, _assets, _owner, _receiver)
 
@@ -1185,7 +1180,7 @@ def _burn_and_withdraw(_shares: uint256, _assets: uint256, _owner: address, _rec
 
 	log Withdraw(_shares, _owner, _receiver, msg.sender, _assets)
 	# for testing - log price change after deposit and fee inflation
-	# log TrackSharePrice((_assets * PRICE_DECIMALS) / _shares, self._virtual_price(), self._virtual_apr()) # log price/apr for product analytics
+	# log TrackSharePrice((_assets * PRICE_DECIMALS) / _shares, self._virtual_price(), self._virtual_apr()) # log price/apr
 
 @internal
 def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256):
@@ -1203,9 +1198,10 @@ def _update_shares(_assets: uint256, _impair: bool = False) -> (uint256, uint256
 
 		return (_assets, 0) # return early if only declaring profits
 	
-	# if impair:
-
-	# If available, take performance fee from delegate to offset impairment and protect depositors
+	# reporting a loss. Burn owner's fees and staked shares
+	# to offset loss then socialize across pool
+	
+	# If available, take performance fee from delegate
 	stake_to_burn: uint256 = self.delegate_stake + self.accrued_fees
 	total_to_burn: uint256 = self._convert_to_shares(_assets)
 
