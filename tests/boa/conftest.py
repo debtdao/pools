@@ -5,8 +5,8 @@ import logging
 
 from eip712.messages import EIP712Message
 
-boa.interpret.set_cache_dir()
-boa.reset_env()
+# boa.interpret.set_cache_dir()
+# boa.reset_env()
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"

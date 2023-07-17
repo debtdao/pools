@@ -1,11 +1,15 @@
+# official vyper releases
+# vyper==0.3.9
 # track nightly vyper releases (need for raw_revert so we can use custom errors)
 # Latest releases of vyper and boa are usually incompatible
-# git+https://github.com/vyperlang/vyper.git
-vyper==0.3.9
+git+https://github.com/vyperlang/vyper.git
 
+# official boa releases
+# titanoboa
 # track nightly titanboa releases
 # git+https://github.com/vyperlang/titanoboa
-git+https://github.com/kibagateaux/titanoboa#feat/event-data-api # for experimental boa features
+# for experimental boa features
+git+https://github.com/kibagateaux/titanoboa#feat/event-data-api
 
 # Ape Framework 
 eth-ape

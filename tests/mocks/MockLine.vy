@@ -1,4 +1,3 @@
-# @version ^0.3.9
 from vyper.interfaces import ERC20 as IERC20
 
 interface ISecuredLine:

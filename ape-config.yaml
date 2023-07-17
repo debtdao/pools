@@ -3,7 +3,7 @@ name: debt-dao-pools
 plugins:
   - name: vyper
   - name: foundry
-  # - name: etherscan
+  - name: etherscan
   # - name: alchemy
   # - name: hardhat 
   # - name: ledger
@@ -13,10 +13,8 @@ ethereum:
   default_network: local
   local:
     default_provider: foundry
-    # uri: http://localhost:8545 # anvil mainnet fork
   mainnet_fork:
     default_provider: foundry
-    # default_provider: hardhat
     transaction_acceptance_timeout: 99999999
   mainnet:
     transaction_acceptance_timeout: 99999999
