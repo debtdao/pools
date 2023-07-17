@@ -1150,28 +1150,31 @@ def _redeem(
 	_receiver: address
 ) -> uint256:
 	"""
+	@notice
+		Burns a specific amount of shares reducing supply to receive assets back. 
+		Takes withdraw fee from assets received back increasing share price.
 	@dev - priviliged internal function. Should run price updates before calculating _assets/_shares params
-
 	"""
-
 	withdraw_fee: uint256 = self._calc_fee(_shares, self.fees.withdraw)
-	# log potential fees for product analytics
 	log RevenueGenerated(_owner, self, withdraw_fee, _shares, convert(FEE_TYPES.WITHDRAW, uint256), self)
 
-	assets_w_fees: uint256 = self._convert_to_assets(_shares) - self._convert_to_assets(withdraw_fee)	
-	self._burn_and_withdraw(_shares, assets_w_fees, _owner, _receiver)
+	# receive less assets than _shares bc of withdraw fee
+	assets_minus_fees: uint256 = self._convert_to_assets(_shares) - self._convert_to_assets(withdraw_fee)
 
-	return assets_w_fees
+	self._burn_and_withdraw(_shares, assets_minus_fees, _owner, _receiver)
+
+	return assets_minus_fees
 
 
 @internal
 def _burn_and_withdraw(_shares: uint256, _assets: uint256, _owner: address, _receiver: address):
 	assert _receiver != empty(address)
-	assert _shares != 0 and _assets != 0
-	# SLOADs last
-	assert _shares <= self.total_supply and _assets <= self._max_liquid_assets()
-
+	assert _shares <= self.total_supply				# dev: insufficient supply
+	assert _assets <= self._max_liquid_assets() 	# dev: insufficient liquidity
+	remaining_assets: uint256 = self.total_assets - _assets	# total must be >= max_liquid
+	assert remaining_assets == 0 or remaining_assets >= self.min_deposit # dev: Pool min reached
 	self._assert_caller_has_approval(_owner, _shares)
+
 	# remove _assets from pool
 	self.total_assets -= _assets		
 	# Burn shares instead of giving to owner. Withdrawals = owner bad
@@ -1364,7 +1367,10 @@ def _get_pool_decimals(_token: address) -> uint8:
 		max_outsize=32, is_static_call=True, revert_on_failure=True
 	)
 
-	return convert(asset_decimals, uint8)
+	if convert(asset_decimals, uint256) == 0:
+		return 18
+	else:
+		 return convert(asset_decimals, uint8)
 
 
 # 	         IERC 3156 Flash Loan functions
